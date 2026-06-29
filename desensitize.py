@@ -113,6 +113,15 @@ SENSITIVE_TERMS: list[str] = [
     "kill",
     "violence",
     "violent",
+    # Claude Code / Anthropic 品牌词（避免竞争品牌词触发审核）
+    "Claude Code",
+    "Claude Opus",
+    "Claude Sonnet",
+    "Claude Haiku",
+    "Claude Fable",
+    "Anthropic",
+    "Co-Authored-By",
+    "noreply@anthropic.com",
 ]
 
 # 编译成一个大正则，按词长降序，避免短词先吃掉长词。
@@ -130,12 +139,15 @@ _HARNESS_USER_MARKERS = (
     "<permissions instructions>",
     "<collaboration_mode>",
     "<skills_instructions>",
+    "<system-reminder>",           # Claude Code 注入的运行时上下文
+    "# claudeMd",                  # Claude Code CLAUDE.md 注入
 )
 
 _CODEX_SYSTEM_MARKERS = (
     "You are a coding agent running in the Codex CLI",
     "Within this context, Codex refers to",
     "# How you work",
+    "You are Claude Code",         # Claude Code system prompt
 )
 
 _PERMISSIONS_MARKERS = (
@@ -195,11 +207,16 @@ def _looks_like_harness_user_message(content) -> bool:
 
 
 def _compact_harness_message(role: str, content) -> str | None:
-    """把 Codex 注入的超长运行时提示压缩成短摘要，降低审核误伤。"""
+    """把 Codex / Claude Code 注入的超长运行时提示压缩成短摘要，降低审核误伤。"""
     text = _content_to_text(content)
     if not text:
         return None
     if role == "system" and any(marker in text for marker in _CODEX_SYSTEM_MARKERS):
+        if "You are Claude Code" in text:
+            return (
+                "You are a coding assistant. Be precise, helpful, concise, and safe. "
+                "Use available tools when needed, follow repository instructions, and keep the user informed."
+            )
         return (
             "You are a coding assistant in Codex CLI. Be precise, helpful, concise, and safe. "
             "Use available tools when needed, follow repository instructions, and keep the user informed."

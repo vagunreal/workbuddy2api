@@ -2,6 +2,8 @@
 # CodeBuddy/WorkBuddy 订阅 -> OpenAI 兼容客户端 —— provider 配置示例（片段）
 # ------------------------------------------------------------
 # 前提：转换器已在本地运行（见 README.md）
+#   uv run converter.py --port 8787
+# 或：
 #   python3 converter.py --port 8787
 #
 # ⚠️ 本文件只是「示例」。若你的客户端需要合并配置，请【手动】把下面的段落
@@ -38,3 +40,20 @@ model_provider = "codebuddy"
 #   接口地址 base_url : http://127.0.0.1:8787/v1
 #   API Key          : 留空（除非转换器启动时用了 --api-key）
 #   模型名 model     : glm-5.2 （或 kimi-k2.7 / deepseek-v4-pro / auto）
+
+
+# ── 方式三：Claude Code（通过 CC Switch，Anthropic API）─────
+# Claude Code 使用 Anthropic Messages API（POST /v1/messages）。
+# 转换器已内置 Anthropic 适配层，可通过 CC Switch 接入。
+#
+# 启动转换器（强烈建议开启脱敏，避免后端审核拦截）：
+#   uv run converter.py --desensitize
+# 若需保留 Claude Code 完整 system prompt（不压缩），加 --no-compact：
+#   uv run converter.py --desensitize --no-compact
+#
+# 通过 CC Switch 配置模型提供商，指向 Anthropic 端点：
+#   base_url : http://127.0.0.1:8787/v1/messages
+#   API Key  : 留空（除非转换器启动时用了 --api-key）
+#   模型名   : deepseek-v4-pro （或 glm-5.2 / kimi-k2.7 / auto 等 CodeBuddy 支持的模型）
+#
+# 注意：模型名必须填 CodeBuddy 支持的名称，不做 Anthropic 名称到 CodeBuddy 名称的自动映射。
