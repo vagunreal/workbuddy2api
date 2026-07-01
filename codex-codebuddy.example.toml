@@ -17,21 +17,21 @@
 #
 # 将以下配置合并到 ~/.codex/config.toml（或项目 codex.toml）：
 
-[model_providers.codebuddy]
-name = "CodeBuddy (via local converter)"
+[model_providers.workbuddy]
+name = "WorkBuddy (via local converter)"
 base_url = "http://127.0.0.1:8787/v1"
 wire_api = "responses"              # ← 关键：使用 Responses API
 env_key = "CODEBUDDY2OPENAI_KEY"    # 转换器未启用 --api-key 时，可随便填一个环境变量名
 
-[profiles.codebuddy]
+[profiles.workbuddy]
 model = "glm-5.2"                   # 也可用 kimi-k2.7 / deepseek-v4-pro / auto 等
-model_provider = "codebuddy"
+model_provider = "workbuddy"
 
 # 然后设置环境变量（值随便填，除非转换器启用了 --api-key）：
 #   export CODEBUDDY2OPENAI_KEY=any-value
 #
 # 启动 Codex CLI：
-#   codex --profile codebuddy "你的任务描述"
+#   codex --profile workbuddy "你的任务描述"
 
 
 # ── 方式二：Cherry Studio / ZCode 等 OpenAI 兼容客户端 ─────
