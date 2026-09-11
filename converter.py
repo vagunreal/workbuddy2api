@@ -704,6 +704,21 @@ PANEL_HTML = """<!doctype html>
   .mtag { border:1px solid; border-radius:5px; padding:1px 6px; font-size:10px; font-weight:600; }
   .ps { font-size:11px; }
   .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
+  /* 接口页 */
+  .chead { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .ct { font-size:14.5px; font-weight:700; }
+  .bigcode { background:#0f172a; color:#e2e8f0; padding:8px 14px; border-radius:8px;
+             font-size:13px; word-break:break-all; }
+  .method { font-size:10.5px; font-weight:800; border-radius:5px; padding:3px 8px;
+            letter-spacing:.5px; flex-shrink:0; }
+  .method.get { background:#dcfce7; color:#15803d; }
+  .method.post { background:#dbeafe; color:#1d4ed8; }
+  .ep { display:flex; align-items:center; gap:12px; padding:9px 10px;
+        border-bottom:1px solid #f3f4f6; }
+  .ep:last-child { border-bottom:0; }
+  .ep code { font-size:12.5px; background:#f8fafc; padding:4px 10px; border-radius:6px;
+             border:1px solid #eef0f2; word-break:break-all; }
+  .edesc { font-size:12px; color:var(--muted); }
   /* API Keys 列表 */
   .krow { display:flex; align-items:center; gap:12px; padding:9px 6px; }
   .krow + .krow { border-top:1px solid #f3f4f6; }
@@ -764,15 +779,17 @@ PANEL_HTML = """<!doctype html>
 
   <div id="page-api" style="display:none">
   <div class="card">
-    <div class="kv"><span>Base URL</span><code id="api-url">—</code>
-      <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
-    <div class="kv"><span>当前 Key</span><code id="api-key">—</code>
-      <button class="mini" onclick="copyTxt('api-key')">复制</button>
+    <div class="chead"><span class="vd" style="background:#4338ca">⚡</span><span class="ct">接入信息</span>
       <span class="note" id="api-note"></span></div>
+    <div class="kv"><span>Base URL</span><code class="bigcode" id="api-url">—</code>
+      <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
+    <div class="kv"><span>当前 Key</span><code class="bigcode" id="api-key">—</code>
+      <button class="mini" onclick="copyTxt('api-key')">复制</button></div>
+    <div class="kv"><span class="note">模型名用「模型」页里上游来源的模型 ID;自定义别名同样可用。流式请求加 "stream": true</span></div>
   </div>
   <div class="card">
-    <div class="kv" style="margin-bottom:12px;"><span style="width:auto; font-size:14px; font-weight:700; color:var(--text);">API Keys</span>
-      <span class="note">创建的 Key 立即生效,可同时存在多个;删除立即失效</span></div>
+    <div class="chead"><span class="vd" style="background:#b45309">🔑</span><span class="ct">API Keys</span>
+      <span class="note">创建立即生效,可同时存在多个;删除立即失效</span></div>
     <div class="add-form" style="margin-bottom:10px;">
       <div class="fe"><span>用途备注</span><input id="key-name" placeholder="如:我的电脑 / 手机" style="width:190px;"></div>
       <button class="mini2" onclick="createKey()" style="align-self:flex-end;">+ 生成新 Key</button>
@@ -780,15 +797,18 @@ PANEL_HTML = """<!doctype html>
     </div>
     <div id="keys-list"><div class="empty">加载中…</div></div>
   </div>
-    <div class="kv"><span>接口前缀</span>
+  <div class="card">
+    <div class="chead"><span class="vd" style="background:#15803d">⇄</span><span class="ct">端点参考</span>
       <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
-      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名,同一服务)</label></div>
-    <div class="kv" style="align-items:flex-start;"><span>可用端点</span>
-      <code id="api-eps" style="white-space:pre-wrap; display:block;">—</code></div>
-    <div class="kv" style="align-items:flex-start;"><span>curl 示例</span>
-      <pre class="curl" id="api-curl">—</pre></div>
-    <div class="kv"><button class="mini" onclick="copyTxt('api-curl')">复制 curl</button>
-      <span class="note">模型名用「模型」页里上游来源的模型 ID;自定义别名同样可用。流式请求加 "stream": true</span></div>
+      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名)</label></div>
+    <div id="api-eps"></div>
+  </div>
+  <div class="card">
+    <div class="chead"><span class="vd" style="background:#0f172a">{ }</span><span class="ct">快速开始</span>
+      <button class="mini" onclick="copyTxt('api-curl')">复制 curl</button></div>
+    <pre class="curl" id="api-curl">—</pre>
+    <div class="kv" style="margin-top:10px;"><span class="note">提示:把 Base URL 和 Key 填进任何 OpenAI 兼容客户端(Cherry Studio / LobeChat / NextChat 等)即可使用</span></div>
+  </div>
   </div>
   </div>
 </div>
@@ -997,13 +1017,17 @@ function renderApi() {
   localStorage.setItem('wb-pv', pv);
   const host = (document.getElementById('api-url').textContent || '').replace(/\\/v1$/, '');
   const p = (host || 'http://127.0.0.1:8787') + '/' + pv;
-  const eps = `POST ${p}/chat/completions        (OpenAI Chat,流式/非流式,tools 支持)
-GET  ${p}/models                    (可用模型列表)`
-    + (pv === 'v1' ? `
-POST ${p}/responses                (OpenAI Responses · Codex CLI)
-POST ${p}/messages                 (Anthropic Messages · Claude Code)
-GET  http://127.0.0.1:8787/panel   (本控制台)` : ' (v2 为别名路由,chat/completions 与 models 与 v1 完全等价)');
-  document.getElementById('api-eps').textContent = eps;
+  const eps = [
+    ['POST', p + '/chat/completions', 'OpenAI Chat — 流式/非流式,原生 tools/tool_calls'],
+    ['GET', p + '/models', '可用模型列表'],
+  ];
+  if (pv === 'v1') {
+    eps.push(['POST', p + '/responses', 'OpenAI Responses — Codex CLI']);
+    eps.push(['POST', p + '/messages', 'Anthropic Messages — Claude Code']);
+    eps.push(['GET', 'http://127.0.0.1:8787/panel', '本控制台']);
+  }
+  document.getElementById('api-eps').innerHTML = eps.map(([m, path, desc]) =>
+    `<div class="ep"><span class="method ${m.toLowerCase()}">${m}</span><code>${esc(path)}</code><span class="edesc">${desc}</span></div>`).join('');
   const model = (window.latestModels || []).find(x => !x.disabled);
   const modelName = model ? model.name : 'glm-5.2';
   const key = (document.getElementById('api-key').textContent || '').trim();
