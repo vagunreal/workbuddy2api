@@ -664,7 +664,8 @@ PANEL_HTML = """<!doctype html>
   .sec-h { font-size:19px; font-weight:700; margin:30px 0 4px; }
   .sec-sub { font-size:12px; color:var(--muted); margin-bottom:14px; }
   .kv { display:flex; align-items:center; gap:10px; margin-bottom:9px; font-size:13px; flex-wrap:wrap; }
-  .kv > span { color:var(--muted); width:64px; flex-shrink:0; }
+  .kv > span:not(.note) { color:var(--muted); width:64px; flex-shrink:0; }
+  .kv .note { color:var(--muted); font-size:12px; flex:1 1 260px; }
   .kv code { background:#f3f4f6; padding:5px 11px; border-radius:6px; word-break:break-all; }
   .kv .note { color:var(--muted); font-size:12px; }
   .mini { background:#f3f4f6; color:#374151; border:1px solid var(--line); border-radius:6px;
@@ -707,8 +708,8 @@ PANEL_HTML = """<!doctype html>
   /* 接口页 */
   .chead { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
   .ct { font-size:14.5px; font-weight:700; }
-  .bigcode { background:#0f172a; color:#e2e8f0; padding:8px 14px; border-radius:8px;
-             font-size:13px; word-break:break-all; }
+  .kv code.bigcode { background:#0f172a; color:#e2e8f0; padding:9px 15px;
+                     border-radius:8px; font-size:13px; word-break:break-all; border:0; }
   .method { font-size:10.5px; font-weight:800; border-radius:5px; padding:3px 8px;
             letter-spacing:.5px; flex-shrink:0; }
   .method.get { background:#dcfce7; color:#15803d; }
@@ -727,6 +728,13 @@ PANEL_HTML = """<!doctype html>
   .krow code { flex:1; background:#f3f4f6; padding:5px 10px; border-radius:6px;
                font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .krow .ku { font-size:11px; color:var(--muted); width:110px; flex-shrink:0; }
+  /* 表单字段(Key 生成行 / 模型编辑展开) */
+  .add-form { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
+  .fe { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .fe > span { font-size:11px; color:var(--muted); }
+  .fe input[type=number], .fe input[type=text], .fe > input { border:1px solid var(--line);
+      border-radius:8px; padding:8px 11px; font-size:13px; width:150px; background:#fff; }
+  .fe input#key-name { width:200px; }
   /* 编辑展开 */
   .fe { display:flex; flex-direction:column; gap:4px; }
   .fe > span { font-size:11px; color:var(--muted); }
