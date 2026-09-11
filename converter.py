@@ -972,10 +972,10 @@ async function loadModels() {
     const p = m.probe;
     const ps_badge = p && p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>' : '';
     const op = m.disabled
-      ? `<button class="mini" onclick="toggleModel('${esc(m.name)}')">恢复</button>`
-      : `<button class="mini" onclick="toggleEdit('${esc(m.name)}')">编辑</button>
-         <button class="mini" onclick="probeOne('${esc(m.name)}', this)">测</button>
-         <button class="mini warn" onclick="toggleModel('${esc(m.name)}')">禁</button>`;
+      ? `<button class="mini" onclick="toggleModel('${esc(m.name)}')">恢复显示</button>`
+      : `<button class="mini" title="编辑该模型的参数规格(上下文/最大输出/输入输出类型)" onclick="toggleEdit('${esc(m.name)}')">参数</button>
+         <button class="mini" title="发一条极小测试消息,验证该模型当前是否可用" onclick="probeOne('${esc(m.name)}', this)">测可用</button>
+         <button class="mini warn" title="从客户端模型列表中隐藏(可随时恢复)" onclick="toggleModel('${esc(m.name)}')">隐藏</button>`;
     const src = m.source && m.source !== '上游' ? `<span class="badge src">${m.source}</span>` : '';
     const meta = m.meta || {};
     const tags = (meta.tags || []).map(t => {
