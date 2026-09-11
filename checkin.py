@@ -45,8 +45,9 @@ def get_auth_dirs() -> list[Path]:
     wsl_dir = Path.home() / ".local" / "share" / "CodeBuddyExtension" / "Data" / "Public" / "auth"
     dirs.append(wsl_dir)
 
-    win_dir = Path("/mnt/c/Users/winuser/AppData/Local/CodeBuddyExtension/Data/Public/auth")
-    dirs.append(win_dir)
+    # WSL 下探测 Windows 宿主机所有用户的凭据目录
+    for p in Path("/mnt/c/Users").glob("*/AppData/Local/CodeBuddyExtension/Data/Public/auth"):
+        dirs.append(p)
 
     return dirs
 
