@@ -286,6 +286,19 @@ workbuddy2api/
 └── checkin_state.json         # 签到状态（运行时生成，不入库）
 ```
 
+## 来源与致谢
+
+本项目是 **[HanHan666666/codebuddy2openai](https://github.com/HanHan666666/codebuddy2openai)** 的二次开发,参考并继承了其核心思路与基础实现(CodeBuddy/WorkBuddy 登录凭据读取、直连后端协议转换、脱敏模块),在此感谢原作者。
+
+在原项目基础上,本仓库扩展了:
+
+- 多账号池:额度用尽自动切换、手动切换、粘性调度与冷却
+- 每日自动签到(多账号遍历)
+- 可视化额度面板(`/panel`,credits 资源包展示)
+- OpenAI Responses / Anthropic Messages 协议端点的补强
+
+原项目的单账号部署方式、协议设计等文档以 [上游仓库](https://github.com/HanHan666666/codebuddy2openai) 为准。
+
 ---
 
 <sub>
