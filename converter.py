@@ -368,7 +368,7 @@ class CredentialPool:
 UPSTREAM_MODELS_URL = "https://copilot.tencent.com/console/enterprises/personal/models"
 MODELS_FILE = Path(__file__).parent / "models_registry.json"
 _models_lock = threading.RLock()
-_upstream_models_cache: dict = {"t": 0.0, "models": []}      # 60s TTL
+_upstream_models_cache: dict = {"t": 0.0, "details": {}, "agent_only": []}  # 60s TTL
 _probe_state: dict = {"running": False, "done": 0, "total": 0, "current": ""}
 
 
@@ -386,26 +386,53 @@ def _save_registry(reg: dict):
     os.replace(tmp, MODELS_FILE)
 
 
-def _fetch_upstream_models(cred: CredentialManager) -> list[str]:
-    """从上游 /console/enterprises/personal/models 拉取真实可用模型（60s TTL，取所有 agent 的并集）。"""
+def _fetch_upstream_models(cred: CredentialManager) -> tuple[dict, list[str]]:
+    """从上游拉取模型详情（60s TTL）。
+
+    返回 (details, agent_only)：
+      details    — {模型id: 官方详情}，来自 data.models（含 maxInputTokens/maxOutputTokens/
+                   credits 倍率/中文描述/多模态/免费标签等）
+      agent_only — 仅出现在 agents 配置里、无详情的模型 id（如内部辅助模型 lite）
+    """
     with _models_lock:
         if time.time() - _upstream_models_cache["t"] < 60:
-            return _upstream_models_cache["models"]
+            return _upstream_models_cache["details"], _upstream_models_cache["agent_only"]
+    details: dict = {}
+    agent_models: list[str] = []
     try:
         headers = cred.get_headers()
         with httpx.Client(timeout=15) as c:
             r = c.get(UPSTREAM_MODELS_URL, headers=headers)
         data = r.json()
-        models: list[str] = []
         if data.get("code") == 0:
-            for agent in ((data.get("data") or {}).get("agents") or []):
+            dd = data.get("data") or {}
+            for m in dd.get("models") or []:
+                mid = m.get("id")
+                if mid:
+                    details[mid] = m
+            for agent in dd.get("agents") or []:
                 for m in agent.get("models") or []:
-                    if m not in models:
-                        models.append(m)
-        _upstream_models_cache.update({"t": time.time(), "models": models})
+                    if m not in agent_models:
+                        agent_models.append(m)
     except Exception:
-        _upstream_models_cache.update({"t": time.time()})
-    return _upstream_models_cache["models"]
+        pass
+    agent_only = [m for m in agent_models if m not in details]
+    with _models_lock:
+        _upstream_models_cache.update({"t": time.time(), "details": details, "agent_only": agent_only})
+    return details, agent_only
+
+
+def _specs_from_upstream(info: dict) -> dict:
+    """把上游模型详情转换成面板规格(用户编辑前的基础值)。"""
+    inp = ["text"]
+    if info.get("supportsImages") and not info.get("disabledMultimodal"):
+        inp.append("image")
+    return {
+        "context_length": int(info.get("maxInputTokens") or info.get("maxAllowedSize") or 0) or 131072,
+        "max_output_tokens": int(info.get("maxOutputTokens") or 0) or 8192,
+        "input": inp,
+        "output": ["text"],
+    }
 
 
 def _default_specs() -> dict:
@@ -426,19 +453,49 @@ def _all_models(cred: CredentialManager | None) -> list[dict]:
     disabled = set(reg.get("disabled") or [])
     out: list[dict] = []
     seen: set[str] = set()
-    upstream = _fetch_upstream_models(cred) if cred is not None else []
-    for m in upstream:
-        if m not in disabled and m not in seen:
-            seen.add(m)
-            out.append({"name": m, "source": "上游", "specs": _model_specs(reg, m)})
+
+    def _merged(name: str, upstream_info: dict | None) -> dict:
+        # 优先级:上游官方规格 < 用户面板编辑(registry.specs)
+        base = _specs_from_upstream(upstream_info) if upstream_info else _default_specs()
+        merged = {**base, **((reg.get("specs") or {}).get(name) or {})}
+        meta = {}
+        if upstream_info:
+            meta = {
+                "display_name": upstream_info.get("name"),
+                "description": upstream_info.get("descriptionZh") or upstream_info.get("descriptionEn"),
+                "credits": upstream_info.get("credits"),
+                "tags": [t for t in (upstream_info.get("tags") or []) if str(t).startswith("badge:")]
+                        or None,
+                "supports_reasoning": upstream_info.get("supportsReasoning"),
+                "supports_tool_call": upstream_info.get("supportsToolCall"),
+            }
+        return merged, meta
+
+    details, agent_only = _fetch_upstream_models(cred) if cred is not None else ({}, [])
+    for mid in details:
+        if mid in disabled or mid in seen:
+            continue
+        seen.add(mid)
+        specs, meta = _merged(mid, details[mid])
+        out.append({"name": mid, "source": "上游", "specs": specs, "meta": meta})
+    for m in agent_only:
+        if m in disabled or m in seen:
+            continue
+        seen.add(m)
+        specs, meta = _merged(m, None)
+        out.append({"name": m, "source": "上游", "specs": specs, "meta": meta})
     for m in DEFAULT_MODELS:
-        if m not in disabled and m not in seen:
-            seen.add(m)
-            out.append({"name": m, "source": "内置", "specs": _model_specs(reg, m)})
+        if m in disabled or m in seen:
+            continue
+        seen.add(m)
+        specs, meta = _merged(m, details.get(m))
+        out.append({"name": m, "source": "内置", "specs": specs, "meta": meta})
     for c in reg.get("custom") or []:
-        if c["name"] not in disabled and c["name"] not in seen:
-            seen.add(c["name"])
-            out.append({"name": c["name"], "source": "自定义", "specs": _model_specs(reg, c["name"])})
+        if c["name"] in disabled or c["name"] in seen:
+            continue
+        seen.add(c["name"])
+        specs, meta = _merged(c["name"], details.get(c["name"]))
+        out.append({"name": c["name"], "source": "自定义", "specs": specs, "meta": meta})
     return out
 
 
@@ -816,9 +873,17 @@ async function loadModels() {
          <button class="mini" onclick="probeOne('${esc(m.name)}', this)">测</button>
          <button class="mini warn" onclick="toggleModel('${esc(m.name)}')">${m.source === '自定义' ? '删' : '禁'}</button>`;
     const src = m.source ? `<span class="badge src">${m.source}</span>` : '';
+    const meta = m.meta || {};
+    const tags = (meta.tags || []).map(t => {
+      const parts = String(t).split(':');          // badge:标签:颜色
+      const lab = parts[1] || '', col = parts[2] || '#d97706';
+      return `<span class="mtag" style="color:${esc(col)}; border-color:${esc(col)}55;">${esc(lab)}</span>`;
+    }).join('');
+    const rate = meta.credits ? `<span class="tag rate">${esc(meta.credits).replace(' credits', '')}</span>` : '';
+    const desc = meta.description ? ` title="${esc(m.name)} · ${esc(meta.description)}${meta.credits ? ' · ' + esc(meta.credits) : ''}"` : '';
     let row = `<div class="mrow${m.disabled ? ' off' : ''}" id="mrow-${esc(m.name)}">
-      <div class="mname"><span class="t" title="${esc(m.name)}">${m.name}</span>${src}${ps_badge}</div>
-      <div>${specSummary(m.specs)}</div>
+      <div class="mname"><span class="t"${desc}>${m.name}</span>${src}${tags}${ps_badge}</div>
+      <div>${specSummary(m.specs)}${rate}</div>
       <div class="ops">${op}</div></div>`;
     if (editingName === m.name && !m.disabled) row += editFormHtml(m.name, m.specs || {});
     return row;
