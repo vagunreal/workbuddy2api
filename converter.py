@@ -693,6 +693,18 @@ PANEL_HTML = """<!doctype html>
   .st.na { color:var(--muted); } .st.off { color:var(--muted); }
   .ops { display:flex; gap:6px; justify-content:flex-end; }
   #probe-state { color:var(--orange); font-size:12px; font-weight:600; }
+  /* ---- v2 页签 ---- */
+  .tabs { display:flex; gap:8px; margin-bottom:20px; }
+  .tab { background:#fff; color:#374151; border:1px solid var(--line); border-radius:10px;
+         padding:9px 20px; font-size:14px; cursor:pointer; font-weight:500; }
+  .tab.act { background:#111827; color:#fff; border-color:#111827; }
+  .ver { font-size:11px; background:#eef2ff; color:#4338ca; border-radius:6px;
+         padding:2px 8px; vertical-align:middle; margin-left:6px; font-weight:700; }
+  .toolbar select { border:1px solid var(--line); border-radius:8px; padding:7px 9px;
+                    font-size:13px; background:#fff; }
+  pre.curl { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px;
+             font-size:12px; overflow-x:auto; white-space:pre-wrap; word-break:break-all;
+             font-family:ui-monospace,Consolas,monospace; max-width:760px; }
   /* 添加表单 + 编辑展开 */
   .add-form { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
   .fe { display:flex; flex-direction:column; gap:4px; }
@@ -716,25 +728,27 @@ PANEL_HTML = """<!doctype html>
 </head>
 <body>
 <div class="wrap">
-  <h1>WorkBuddy 账号池</h1>
+  <h1>WorkBuddy 控制台<span class="ver">v2</span></h1>
   <div class="sub">多账号额度聚合 · 数据来自腾讯 CodeBuddy 后端 · <b id="refreshed"></b></div>
+  <div class="tabs">
+    <button class="tab act" data-p="home" onclick="showPage('home')">🖥️ 主页面</button>
+    <button class="tab" data-p="models" onclick="showPage('models')">🧩 模型</button>
+    <button class="tab" data-p="api" onclick="showPage('api')">🔌 接口</button>
+  </div>
+  <div id="page-home">
   <div class="toolbar">
     <span class="auto" id="auto">30s 自动刷新</span>
+    <span class="auto">折算模型:</span>
+    <select id="rate-model" onchange="render()"></select>
+    <span style="flex:1"></span>
     <button onclick="load()">刷新全部账号</button>
   </div>
   <div class="stats" id="stats"></div>
   <div id="cards"><div class="empty">加载中…</div></div>
-
-  <div class="sec-h">模型管理</div>
-  <div class="sec-sub">自动发现上游可用模型 · 每个模型可编辑参数规格(客户端添加模型时照抄) · 支持自定义添加/禁用/删除</div>
-  <div class="card">
-    <div class="kv"><span>Base URL</span><code id="api-url">—</code>
-      <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
-    <div class="kv"><span>API Key</span><code id="api-key">—</code>
-      <button class="mini" onclick="copyTxt('api-key')">复制</button>
-      <span class="note" id="api-note"></span></div>
-    <div class="kv"><span class="note">所有模型共享上方账号池的额度;自定义别名可直接作为 model 参数传给任何客户端</span></div>
   </div>
+
+  <div id="page-models" style="display:none">
+  <div class="sec-sub" style="margin-top:4px;">自动发现上游可用模型 · 每个模型可编辑参数规格(客户端添加模型时照抄) · 支持自定义添加/禁用/删除</div>
   <div class="card">
     <div class="add-form">
       <div class="fe"><span>模型 ID</span><input id="new-model" placeholder="如 glm-5.4"></div>
@@ -748,6 +762,26 @@ PANEL_HTML = """<!doctype html>
     </div>
     <div class="model-list" id="model-list"><div class="empty">加载中…</div></div>
   </div>
+  </div>
+
+  <div id="page-api" style="display:none">
+  <div class="card">
+    <div class="kv"><span>Base URL</span><code id="api-url">—</code>
+      <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
+    <div class="kv"><span>API Key</span><code id="api-key">—</code>
+      <button class="mini" onclick="copyTxt('api-key')">复制</button>
+      <span class="note" id="api-note"></span></div>
+    <div class="kv"><span>接口前缀</span>
+      <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
+      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名,同一服务)</label></div>
+    <div class="kv" style="align-items:flex-start;"><span>可用端点</span>
+      <code id="api-eps" style="white-space:pre-wrap; display:block;">—</code></div>
+    <div class="kv" style="align-items:flex-start;"><span>curl 示例</span>
+      <pre class="curl" id="api-curl">—</pre></div>
+    <div class="kv"><button class="mini" onclick="copyTxt('api-curl')">复制 curl</button>
+      <span class="note">模型名用「模型」页里上游来源的模型 ID;自定义别名同样可用。流式请求加 "stream": true</span></div>
+  </div>
+  </div>
 </div>
 <script>
 const fmt = n => (n ?? 0).toLocaleString('en-US');
@@ -759,17 +793,26 @@ function badge(a) {
   if (a.current) return '<span class="badge cur">● 当前使用</span>';
   return '<span class="badge">备用</span>';
 }
-function render(d) {
+function render() {
+  const d = latestAccounts;
   const accs = d.accounts || [];
   document.getElementById('refreshed').textContent =
     '更新于 ' + new Date(d.generated_at * 1000).toLocaleTimeString('zh-CN');
   if (!accs.length) { document.getElementById('cards').innerHTML = '<div class="empty">账号池为空</div>'; return; }
   const totalRemain = accs.reduce((s,a)=>s+(a.credits?.total_remain||0),0);
   const checked = accs.filter(a=>a.checkin?.today && a.checkin?.ok).length;
+  const sel = document.getElementById('rate-model');
+  const mm = (window.latestModels || []).find(x => x.name === (sel && sel.value));
+  const rate = mm && mm.meta && mm.meta.credits ? parseFloat(String(mm.meta.credits).replace(/[^0-9.]/g, '')) : 0;
+  let eqCard = '';
+  if (mm && rate > 0) {
+    const times = Math.round(totalRemain / rate / 1000);   // 估算:每次对话约 1K tokens
+    eqCard = `<div class="stat"><div class="v">≈ ${fmt(times)} 次</div><div class="k">${mm.name}(${rate}x · 按 1K tokens/次)</div></div>`;
+  }
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="v">${accs.length}</div><div class="k">账号总数</div></div>
     <div class="stat"><div class="v">${fmt(totalRemain)}</div><div class="k">总剩余 credits</div></div>
-    <div class="stat"><div class="v">${checked}/${accs.length}</div><div class="k">今日已签到</div></div>`;
+    <div class="stat"><div class="v">${checked}/${accs.length}</div><div class="k">今日已签到</div></div>${eqCard}`;
   document.getElementById('cards').innerHTML = accs.map(a => {
     const c = a.credits || {};
     const exp = a.token_expires_at ? new Date(a.token_expires_at).toLocaleString('zh-CN') : '?';
@@ -810,9 +853,11 @@ function render(d) {
     </div>`;
   }).join('');
 }
+let latestAccounts = {accounts: []};
 async function load() {
-  try { render(await (await fetch('/v1/account-status')).json()); }
-  catch(e) { document.getElementById('cards').innerHTML = `<div class="empty">加载失败: ${e}</div>`; }
+  try { latestAccounts = await (await fetch('/v1/account-status')).json(); }
+  catch(e) { document.getElementById('cards').innerHTML = `<div class="empty">加载失败: ${e}</div>`; return; }
+  render();
 }
 async function switchTo(uid, btn) {
   btn.disabled = true; btn.textContent = '切换中…';
@@ -890,8 +935,60 @@ async function loadModels() {
   }).join('');
   document.getElementById('model-list').innerHTML =
     rows || '<div class="empty">模型列表为空</div>';
+  window.latestModels = d.models || [];
+  const rsel = document.getElementById('rate-model');
+  if (rsel) {
+    const cur = rsel.value || localStorage.getItem('wb-rate-model') || '';
+    const opts = (d.models || []).filter(x => !x.disabled)
+      .map(x => `<option value="${esc(x.name)}">${esc(x.name)}${x.meta?.credits ? ' · ' + esc(x.meta.credits).replace(' credits', '') : ''}</option>`).join('');
+    if (rsel.innerHTML !== opts) {
+      rsel.innerHTML = opts;
+      if (cur) rsel.value = cur;
+      localStorage.setItem('wb-rate-model', rsel.value);
+    }
+  }
+  render();        // 倍率下拉就绪后刷新等效用量卡
+  renderApi();
   if (ps.running) setTimeout(loadModels, 2000);   // 探测进行中:2s 轮询进度
 }
+
+/* ---- v2 页签与接口页 ---- */
+function showPage(p) {
+  for (const id of ['home', 'models', 'api'])
+    document.getElementById('page-' + id).style.display = (id === p ? '' : 'none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('act', t.dataset.p === p));
+  localStorage.setItem('wb-page', p);
+  if (p === 'api') renderApi();
+}
+function renderApi() {
+  const pv = (document.querySelector('input[name="pv"]:checked') || {value: 'v1'}).value;
+  localStorage.setItem('wb-pv', pv);
+  const host = (document.getElementById('api-url').textContent || '').replace(/\\/v1$/, '');
+  const p = (host || 'http://127.0.0.1:8787') + '/' + pv;
+  const eps = `POST ${p}/chat/completions        (OpenAI Chat,流式/非流式,tools 支持)
+GET  ${p}/models                    (可用模型列表)`
+    + (pv === 'v1' ? `
+POST ${p}/responses                (OpenAI Responses · Codex CLI)
+POST ${p}/messages                 (Anthropic Messages · Claude Code)
+GET  http://127.0.0.1:8787/panel   (本控制台)` : '
+(v2 为别名路由,chat/completions 与 models 与 v1 完全等价)');
+  document.getElementById('api-eps').textContent = eps;
+  const model = (window.latestModels || []).find(x => !x.disabled);
+  const modelName = model ? model.name : 'glm-5.2';
+  const key = (document.getElementById('api-key').textContent || '').trim();
+  const keyHdr = key.startsWith('(') ? '' : `
+  -H "Authorization: Bearer ${key}"`;
+  document.getElementById('api-curl').textContent =
+`curl ${p}/chat/completions \
+  -H "Content-Type: application/json"${keyHdr} \
+  -d '{"model":"${modelName}","messages":[{"role":"user","content":"你好"}],"stream":true}'`;
+}
+(function initV2() {
+  const pg = localStorage.getItem('wb-page');
+  if (pg && pg !== 'home') showPage(pg);
+  const pv = localStorage.getItem('wb-pv');
+  if (pv) { const r = document.querySelector(`input[name="pv"][value="${pv}"]`); if (r) r.checked = true; }
+})();
 function toggleEdit(name) {
   editingName = (editingName === name) ? null : name;
   loadModels();
@@ -2074,6 +2171,10 @@ def main():
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
+
+# /v2 别名路由:兼容习惯使用 /v2 前缀的客户端(与 /v1 同一处理器)
+app.add_api_route("/v2/chat/completions", chat_completions, methods=["POST"])
+app.add_api_route("/v2/models", list_models, methods=["GET"])
 
 if __name__ == "__main__":
     main()
