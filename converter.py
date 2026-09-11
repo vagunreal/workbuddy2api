@@ -32,6 +32,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 import uvicorn
 
@@ -310,6 +311,20 @@ class CredentialPool:
         with self._lock:
             return self.creds[self._current] if self.creds else None
 
+    def set_current(self, uid: str) -> bool:
+        """手动切换当前账号（按 uid 或凭据文件名匹配）；清除其冷却并粘住。"""
+        with self._lock:
+            for i, c in enumerate(self.creds):
+                try:
+                    u = c.summary().get("uid")
+                except Exception:
+                    u = None
+                if u == uid or c.path.name == uid:
+                    self._current = i
+                    self._failed_until.pop(i, None)
+                    return True
+            return False
+
     def report_success(self, cred: CredentialManager):
         """粘住成功账号；清除其冷却状态。"""
         with self._lock:
@@ -398,6 +413,9 @@ PANEL_HTML = """<!doctype html>
   button:active { transform:scale(.98); }
   .auto { font-size:12px; color:var(--muted); }
   .empty { text-align:center; color:var(--muted); padding:40px; }
+  .sw { background:#f3f4f6; color:#374151; border:1px solid var(--line); border-radius:8px;
+        padding:5px 12px; font-size:12px; cursor:pointer; margin-left:auto; }
+  .sw:hover { background:#e5e7eb; }
 </style>
 </head>
 <body>
@@ -448,7 +466,8 @@ function render(d) {
     }).join('');
     return `<div class="card">
       <div class="head"><span class="badge">WORKBUDDY</span>${badge(a)}
-        <span class="nick">${a.nickname || '未知账号'}</span></div>
+        <span class="nick">${a.nickname || '未知账号'}</span>
+        ${a.current ? '' : `<button class="sw" onclick="switchTo('${a.uid}', this)">设为当前使用</button>`}</div>
       <div class="meta">UID <code>${(a.uid||'').slice(0,8)}…</code>
         · token 到期 ${exp}${a.token_expired ? ' <b style="color:#ef4444">(已过期,将自动刷新)</b>' : ''}
         · 合计 <b>${fmt(c.total_remain)}</b> / ${fmt(c.total_size)} credits</div>
@@ -463,6 +482,15 @@ function render(d) {
 async function load() {
   try { render(await (await fetch('/v1/account-status')).json()); }
   catch(e) { document.getElementById('cards').innerHTML = `<div class="empty">加载失败: ${e}</div>`; }
+}
+async function switchTo(uid, btn) {
+  btn.disabled = true; btn.textContent = '切换中…';
+  try {
+    const r = await fetch('/v1/account-switch', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({uid})});
+    if (!r.ok) throw new Error((await r.json()).error?.message || r.status);
+  } catch(e) { alert('切换失败: ' + e.message); }
+  load();
 }
 load();
 setInterval(load, 30000);
@@ -505,6 +533,13 @@ PASSTHROUGH_BODY_KEYS = {
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="codebuddy2openai", version="2.0")
+# 允许 CLIProxyAPI 管理面板(8317)下的 workbuddy 板块页跨源调用本服务
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8317", "http://127.0.0.1:8317"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 CONFIG: dict = {"api_key": "", "pool": None, "log_path": None,
                 "desensitize": False, "no_compact": False}  # pool: CredentialPool | None
 
@@ -674,6 +709,7 @@ def account_status():
             accounts.append({
                 "nickname": s.get("nickname"),
                 "uid": s.get("uid"),
+                "file": cred.path.name,
                 "current": s.get("current", False),
                 "cooldown_remaining": s.get("cooldown_remaining", 0),
                 "token_expired": s.get("token_expired", False),
@@ -683,6 +719,24 @@ def account_status():
                 "credits": credits,
             })
     return {"accounts": accounts, "generated_at": int(time.time())}
+
+
+@app.post("/v1/account-switch")
+async def account_switch(request: Request):
+    """手动切换当前使用的账号。请求体: {"uid": "<账号uid或凭据文件名>"}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    uid = (payload or {}).get("uid", "")
+    if not uid:
+        raise HTTPException(status_code=400, detail={"error": {"message": "uid is required", "type": "invalid_request_error"}})
+    pool = _pool()
+    if not pool.set_current(uid):
+        raise HTTPException(status_code=404, detail={"error": {"message": f"账号不存在: {uid}", "type": "not_found"}})
+    cur = pool.get_current()
+    _log(f"⇄ 手动切换当前账号 -> {_safe_nickname(cur)} ({uid})")
+    return {"ok": True, "current_uid": uid, "accounts": pool.snapshot()}
 
 
 @app.get("/panel")
