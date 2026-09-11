@@ -31,6 +31,11 @@
 
 ## 快速开始
 
+> 项目可解压/克隆到**任意目录**运行：所有脚本（`start.sh` / `login.sh`）均以脚本自身位置定位，
+> 运行时文件（`checkin_state.json`、日志）也生成在项目目录内，不依赖固定安装路径。
+> 唯二的例外是"凭据目录"（由 WorkBuddy 桌面端决定，可用 `CODEBUDDY_AUTH_DIR` 改）和
+> systemd 的 `ExecStart`（systemd 要求绝对路径，见下文模板注释）。
+
 ### 1. 安装依赖
 
 ```bash
@@ -189,6 +194,7 @@ After=network.target
 
 [Service]
 Type=simple
+# 下面两行的路径改成你实际解压项目的目录（systemd 要求绝对路径，%h 代表用户 home）
 WorkingDirectory=%h/workbuddy2api
 ExecStart=%h/workbuddy2api/start.sh --desensitize
 Restart=on-failure
