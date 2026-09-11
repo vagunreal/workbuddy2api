@@ -31,7 +31,7 @@ global.navigator = { clipboard: { writeText(){} } };
 global.alert = ()=>{}; global.setInterval = ()=>{}; global.setTimeout = ()=>{};
 const src = require('fs').readFileSync(process.argv[2],'utf8');
 eval(src);
-for (const fn of ['showPage','renderApi','loadModels','probeAll','saveSpecs','switchTo','toggleEdit','render','load','copyTxt']) {
+for (const fn of ['showPage','renderApi','loadModels','refreshModels','saveSpecs','switchTo','toggleEdit','render','load','copyTxt']) {
   if (typeof global[fn] !== 'function' && typeof eval('globalThis.' + fn) !== 'function' && typeof eval(fn) !== 'function')
     throw new Error('函数缺失: ' + fn);
 }

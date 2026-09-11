@@ -745,8 +745,8 @@ PANEL_HTML = """<!doctype html>
   <div class="sec-sub" style="margin-top:4px;">自动发现上游可用模型 · 每个模型可编辑参数规格(客户端添加模型时照抄) · 支持自定义添加/禁用/删除</div>
   <div class="card">
     <div class="toolbar" style="justify-content:flex-end; margin:0 0 10px;">
-      <span id="probe-state"></span>
-      <button id="probe-all-btn" onclick="probeAll()">可用性全面检测</button>
+      <span class="auto" id="models-updated"></span>
+      <button class="mini" onclick="refreshModels()">↻ 刷新模型列表</button>
     </div>
     <div class="model-list" id="model-list"><div class="empty">加载中…</div></div>
   </div>
@@ -882,10 +882,6 @@ async function loadModels() {
   const k = document.getElementById('api-key');
   k.textContent = api.auth_enabled ? api.api_key : '(未启用鉴权,客户端留空即可)';
   document.getElementById('api-note').textContent = api.auth_enabled ? '' : '如需启用鉴权,启动时加 --api-key your-secret';
-  const ps = d.probe_state || {};
-  document.getElementById('probe-state').textContent =
-    ps.running ? `⏳ 可用性检测中 ${ps.done}/${ps.total} · ${ps.current || ''}` : '';
-  document.getElementById('probe-all-btn').disabled = !!ps.running;
   if (editingName) return;   // 编辑展开期间冻结列表,避免输入丢失
   // 展示过滤:auto、无倍率(官方未上架计费)、探测失败(❌=不能用)的模型一律不显示;
   // 禁用模型保留以便恢复
@@ -965,7 +961,6 @@ async function loadModels() {
     grouped || '<div class="empty">所有模型均不可用或已被过滤</div>';
   window.latestModels = d.models || [];
   renderApi();
-  if (ps.running) setTimeout(loadModels, 2000);   // 探测进行中:2s 轮询进度
 }
 
 /* ---- v2 页签与接口页 ---- */
@@ -1032,8 +1027,16 @@ async function probeOne(name, btn) {
   } catch(e) { alert('探测失败: ' + e.message); }
   loadModels();
 }
-async function probeAll() {
-  try { await fetch('/v1/models/probe-all', {method:'POST'}); } catch(e) { alert(e.message); }
+async function refreshModels(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '刷新中…'; }
+  try {
+    const r = await fetch('/v1/models-refresh');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    document.getElementById('models-updated').textContent =
+      '已同步 ' + d.count + ' 个模型 · ' + new Date().toLocaleTimeString('zh-CN');
+  } catch(e) { alert('刷新失败: ' + e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = '↻ 刷新模型列表'; }
   loadModels();
 }
 async function toggleModel(name) {
@@ -1401,6 +1404,21 @@ async def models_specs(request: Request):
     reg.setdefault("specs", {})[name] = merged
     _save_registry(reg)
     return {"ok": True, "name": name, "specs": merged}
+
+
+@app.get("/v1/models-refresh")
+def models_refresh():
+    """强制重新拉取上游模型目录(名称/规格/倍率/标签),不发聊天请求、零消耗。"""
+    cred = _cred_for_models()
+    with _models_lock:
+        _upstream_models_cache["t"] = 0.0
+    models = _all_models(cred)
+    reg = _load_registry()
+    for m in models:
+        m["probe"] = (reg.get("probe") or {}).get(m["name"])
+        m["disabled"] = False
+    return {"ok": True, "refreshed": True, "models": models,
+            "count": len(models)}
 
 
 @app.post("/v1/models/probe")
