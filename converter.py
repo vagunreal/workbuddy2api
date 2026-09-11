@@ -614,7 +614,7 @@ PANEL_HTML = """<!doctype html>
   .stat .v { font-size:22px; font-weight:700; }
   .stat .k { font-size:12px; color:var(--muted); margin-top:2px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
-          padding:20px 22px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+          padding:20px 22px; margin-bottom:22px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
   .head { display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
   .badge { font-size:11px; font-weight:700; letter-spacing:.5px; padding:3px 8px;
            border-radius:6px; background:#eff6ff; color:var(--blue); }
@@ -793,7 +793,11 @@ PANEL_HTML = """<!doctype html>
       <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
     <div class="kv"><span>当前 Key</span><code class="bigcode" id="api-key">—</code>
       <button class="mini" onclick="copyTxt('api-key')">复制</button></div>
-    <div class="kv"><span class="note">模型名用「模型」页里上游来源的模型 ID;自定义别名同样可用。流式请求加 "stream": true</span></div>
+    <div class="chead" style="margin:18px 0 8px;"><span class="ct" style="font-size:13px; color:var(--muted);">调用端点</span>
+      <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
+      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名)</label>
+      <span class="note">三类接口任选其一接入;模型名用「模型」页里的模型 ID,流式加 "stream": true</span></div>
+    <div id="api-eps"></div>
   </div>
   <div class="card">
     <div class="chead"><span class="vd" style="background:#b45309">🔑</span><span class="ct">API Keys</span>
@@ -806,16 +810,10 @@ PANEL_HTML = """<!doctype html>
     <div id="keys-list"><div class="empty">加载中…</div></div>
   </div>
   <div class="card">
-    <div class="chead"><span class="vd" style="background:#15803d">⇄</span><span class="ct">端点参考</span>
-      <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
-      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名)</label></div>
-    <div id="api-eps"></div>
-  </div>
-  <div class="card">
     <div class="chead"><span class="vd" style="background:#0f172a">{ }</span><span class="ct">快速开始</span>
       <button class="mini" onclick="copyTxt('api-curl')">复制 curl</button></div>
     <pre class="curl" id="api-curl">—</pre>
-    <div class="kv" style="margin-top:10px;"><span class="note">提示:把 Base URL 和 Key 填进任何 OpenAI 兼容客户端(Cherry Studio / LobeChat / NextChat 等)即可使用</span></div>
+    <div class="kv" style="margin-top:10px;"><span class="note">把 Base URL 和 Key 填进任何 OpenAI 兼容客户端(Cherry Studio / LobeChat / NextChat 等)即可使用</span></div>
   </div>
   </div>
   </div>
@@ -1026,25 +1024,19 @@ function renderApi() {
   const host = (document.getElementById('api-url').textContent || '').replace(/\\/v1$/, '');
   const p = (host || 'http://127.0.0.1:8787') + '/' + pv;
   const eps = [
-    ['POST', p + '/chat/completions', 'OpenAI Chat — 流式/非流式,原生 tools/tool_calls'],
-    ['GET', p + '/models', '可用模型列表'],
+    ['POST', '/chat/completions', 'OpenAI Chat — 通用对话/工具调用'],
+    ['POST', '/responses', 'OpenAI Responses — Codex CLI'],
+    ['POST', '/messages', 'Anthropic Messages — Claude Code'],
   ];
-  if (pv === 'v1') {
-    eps.push(['POST', p + '/responses', 'OpenAI Responses — Codex CLI']);
-    eps.push(['POST', p + '/messages', 'Anthropic Messages — Claude Code']);
-    eps.push(['GET', 'http://127.0.0.1:8787/panel', '本控制台']);
-  }
   document.getElementById('api-eps').innerHTML = eps.map(([m, path, desc]) =>
-    `<div class="ep"><span class="method ${m.toLowerCase()}">${m}</span><code>${esc(path)}</code><span class="edesc">${desc}</span></div>`).join('');
+    `<div class="ep"><span class="method ${m.toLowerCase()}">${m}</span><code>${p}${esc(path)}</code><span class="edesc">${desc}</span></div>`).join('');
   const model = (window.latestModels || []).find(x => !x.disabled);
   const modelName = model ? model.name : 'glm-5.2';
   const key = (document.getElementById('api-key').textContent || '').trim();
   const keyHdr = key.startsWith('(') ? '' : `
   -H "Authorization: Bearer ${key}"`;
   document.getElementById('api-curl').textContent =
-`curl ${p}/chat/completions \
-  -H "Content-Type: application/json"${keyHdr} \
-  -d '{"model":"${modelName}","messages":[{"role":"user","content":"你好"}],"stream":true}'`;
+    `curl ${p}/chat/completions -H "Content-Type: application/json"${keyHdr} -d '{"model":"${modelName}","messages":[{"role":"user","content":"你好"}],"stream":true}'`;
 }
 (function initV2() {
   const pg = localStorage.getItem('wb-page');
