@@ -706,7 +706,11 @@ PANEL_HTML = """<!doctype html>
   .ps { font-size:11px; }
   .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
   /* 接口页 */
-  .chead { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  pre.curl { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px;
+             font-size:12.5px; line-height:1.7; white-space:pre-wrap; word-break:break-all;
+             overflow-x:auto; max-width:100%; box-sizing:border-box; margin:0;
+             font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .chead { display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
   .ct { font-size:14.5px; font-weight:700; }
   .kv code.bigcode { background:#0f172a; color:#e2e8f0; padding:9px 15px;
                      border-radius:8px; font-size:13px; word-break:break-all; border:0; }
@@ -794,8 +798,6 @@ PANEL_HTML = """<!doctype html>
     <div class="kv"><span>当前 Key</span><code class="bigcode" id="api-key">—</code>
       <button class="mini" onclick="copyTxt('api-key')">复制</button></div>
     <div class="chead" style="margin:18px 0 8px;"><span class="ct" style="font-size:13px; color:var(--muted);">调用端点</span>
-      <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
-      <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名)</label>
       <span class="note">三类接口任选其一接入;模型名用「模型」页里的模型 ID,流式加 "stream": true</span></div>
     <div id="api-eps"></div>
   </div>
@@ -1019,8 +1021,7 @@ function showPage(p) {
   if (p === 'api') { renderApi(); loadKeys(); }
 }
 function renderApi() {
-  const pv = (document.querySelector('input[name="pv"]:checked') || {value: 'v1'}).value;
-  localStorage.setItem('wb-pv', pv);
+  const pv = 'v1';
   const host = (document.getElementById('api-url').textContent || '').replace(/\\/v1$/, '');
   const p = (host || 'http://127.0.0.1:8787') + '/' + pv;
   const eps = [
