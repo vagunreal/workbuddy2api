@@ -7,9 +7,9 @@ test_anthropic_adapter.py — 验证 Anthropic API 适配层的转换逻辑。
 
 import json
 import sys
-sys.path.insert(0, ".")
+sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__))))
 
-from anthropic_adapter import (
+from core.anthropic_adapter import (
     anthropic_request_to_chat,
     AnthropicStreamConverter,
 )

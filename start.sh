@@ -9,7 +9,7 @@ cd "$DIR"
 
 # 启动前自动执行签到领积分（遍历账号池中所有账号）
 echo "🎁 正在执行启动时签到与积分领取（所有账号）..."
-"$DIR/.venv/bin/python" "$DIR/checkin.py" || true
+"$DIR/.venv/bin/python" "$DIR/scripts/checkin.py" || true
 
 echo "🚀 启动 workbuddy2api 服务..."
 exec "$DIR/.venv/bin/python" "$DIR/converter.py" "$@"

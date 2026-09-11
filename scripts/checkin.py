@@ -14,7 +14,7 @@ import httpx
 BACKEND = "https://copilot.tencent.com"
 CHECKIN_URL = "https://www.codebuddy.cn/v2/billing/meter/daily-checkin"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
-STATE_FILE = Path(__file__).parent / "checkin_state.json"
+STATE_FILE = Path(__file__).resolve().parent.parent / "checkin_state.json"
 
 
 def record_checkin_state(uid: str, nickname: str, ok: bool, msg: str):

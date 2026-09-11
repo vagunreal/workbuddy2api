@@ -38,19 +38,19 @@ from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 import uvicorn
 
 try:
-    from desensitize import desensitize_body
+    from core.desensitize import desensitize_body
 except ImportError:  # 模块缺失时降级为不脱敏
     def desensitize_body(body, roles=("system",), desensitize_harness_user=False,
                          desensitize_tools=False, compact_harness=False,
                          strip_tool_metadata=False):
         return body
 
-from responses_adapter import (
+from core.responses_adapter import (
     responses_request_to_chat,
     ResponsesStreamConverter,
 )
-from responses_projection import project_responses_chat_body
-from anthropic_adapter import (
+from core.responses_projection import project_responses_chat_body
+from core.anthropic_adapter import (
     anthropic_request_to_chat,
     AnthropicStreamConverter,
 )

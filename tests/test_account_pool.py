@@ -21,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx
 import uvicorn
@@ -111,6 +111,10 @@ def check(name: str, cond: bool, detail: str = ""):
 def main():
     import converter
     from fastapi.testclient import TestClient
+
+    # 隔离真实 api_keys.json:测试期间指向不存在的文件,避免面板创建的 Key 干扰鉴权
+    import tempfile as _td
+    converter.KEYS_FILE = Path(_td.mkdtemp()) / "api_keys_test.json"
 
     _start_mock()
     print("== mock 后端已启动 ==")

@@ -276,21 +276,21 @@ openai-compatibility:
 
 ```
 workbuddy2api/
-├── converter.py               # 主服务：三协议转换 + 账号池 + 面板（FastAPI）
-├── responses_adapter.py       # Responses API ↔ Chat 转换
-├── responses_projection.py    # Responses 请求投影/压缩
-├── anthropic_adapter.py       # Anthropic Messages ↔ Chat 转换
-├── desensitize.py             # 内容审核脱敏（零宽字符 + system 压缩）
-├── checkin.py                 # 每日签到（多账号遍历 + 状态记录）
-├── oauth_login.py             # OAuth 设备流登录，生成 {uid}.info 凭据
+├── converter.py               # 主服务入口：三协议转换 + 账号池 + 可视化面板（FastAPI）
+├── core/                      # 核心模块
+│   ├── responses_adapter.py   #   Responses API ↔ Chat 转换
+│   ├── responses_projection.py#   Responses 请求投影/压缩
+│   ├── anthropic_adapter.py   #   Anthropic Messages ↔ Chat 转换
+│   └── desensitize.py         #   内容审核脱敏（零宽字符 + system 压缩）
+├── scripts/                   # 工具脚本
+│   ├── checkin.py             #   每日签到（多账号遍历 + 状态记录）
+│   └── oauth_login.py         #   OAuth 设备流登录，生成 {uid}.info 凭据
+├── tests/                     # 测试（账号池端到端 / 协议适配器 / 面板 JS 质量门）
 ├── start.sh                   # 启动脚本（先签到再起服务）
 ├── login.sh                   # 登录脚本
-├── test_account_pool.py       # 账号池端到端测试（含 mock 后端）
-├── test_anthropic_adapter.py  # Anthropic 适配器测试
-├── test_responses_adapter.py  # Responses 适配器测试
 ├── requirements.txt           # fastapi / uvicorn / httpx
 ├── Dockerfile / docker-compose.yml
-└── checkin_state.json         # 签到状态（运行时生成，不入库）
+└── *.json                     # 运行时状态（签到/模型注册表/API Keys，自动生成，不入库）
 ```
 
 ## 来源与致谢
