@@ -32,7 +32,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 import uvicorn
 
 try:
@@ -349,6 +349,127 @@ class CredentialPool:
 # 模型列表
 # ---------------------------------------------------------------------------
 
+PANEL_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkBuddy 账号池 · 配额管理</title>
+<style>
+  :root { --green:#22c55e; --orange:#f59e0b; --red:#ef4444; --blue:#3b82f6;
+          --bg:#f5f6f8; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text);
+         font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; padding:32px 24px; }
+  .wrap { max-width:960px; margin:0 auto; }
+  h1 { font-size:26px; font-weight:700; margin-bottom:4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .sub b { color:var(--green); }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:12px 18px; min-width:150px; }
+  .stat .v { font-size:22px; font-weight:700; }
+  .stat .k { font-size:12px; color:var(--muted); margin-top:2px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:20px 22px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .head { display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .badge { font-size:11px; font-weight:700; letter-spacing:.5px; padding:3px 8px;
+           border-radius:6px; background:#eff6ff; color:var(--blue); }
+  .badge.cur { background:#dcfce7; color:#16a34a; }
+  .badge.cool { background:#fef3c7; color:#d97706; }
+  .nick { font-size:18px; font-weight:600; }
+  .meta { color:var(--muted); font-size:12px; margin-bottom:12px; word-break:break-all; }
+  .meta code { background:#f3f4f6; padding:1px 6px; border-radius:4px; }
+  .checkin { font-size:13px; margin-bottom:14px; }
+  .checkin .ok { color:#16a34a; } .checkin .no { color:var(--red); }
+  .pkg { margin-bottom:12px; }
+  .pkg .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; gap:8px; }
+  .pkg .name { font-weight:500; }
+  .pkg .nums { color:var(--muted); white-space:nowrap; }
+  .pkg .nums b { color:var(--text); }
+  .bar { height:8px; background:#e5e7eb; border-radius:99px; overflow:hidden; }
+  .bar i { display:block; height:100%; border-radius:99px; background:var(--green); transition:width .4s; }
+  .bar i.mid { background:var(--orange); } .bar i.low { background:var(--red); }
+  .cycle { font-size:11px; color:var(--muted); margin-top:4px; }
+  .err { color:var(--red); font-size:13px; }
+  .toolbar { display:flex; justify-content:flex-end; margin-bottom:16px; align-items:center; gap:12px; }
+  button { background:#111827; color:#fff; border:0; border-radius:10px; padding:10px 18px;
+           font-size:14px; cursor:pointer; }
+  button:active { transform:scale(.98); }
+  .auto { font-size:12px; color:var(--muted); }
+  .empty { text-align:center; color:var(--muted); padding:40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WorkBuddy 账号池</h1>
+  <div class="sub">多账号额度聚合 · 数据来自腾讯 CodeBuddy 后端 · <b id="refreshed"></b></div>
+  <div class="toolbar">
+    <span class="auto" id="auto">30s 自动刷新</span>
+    <button onclick="load()">刷新全部账号</button>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div id="cards"><div class="empty">加载中…</div></div>
+</div>
+<script>
+const fmt = n => (n ?? 0).toLocaleString('en-US');
+function barHtml(pct) {
+  const cls = pct <= 20 ? 'low' : pct <= 50 ? 'mid' : '';
+  return `<div class="bar"><i class="${cls}" style="width:${Math.max(pct,2)}%"></i></div>`;
+}
+function badge(a) {
+  if (a.cooldown_remaining > 0) return `<span class="badge cool">冷却 ${Math.ceil(a.cooldown_remaining/60)} 分钟</span>`;
+  if (a.current) return '<span class="badge cur">● 当前使用</span>';
+  return '<span class="badge">备用</span>';
+}
+function render(d) {
+  const accs = d.accounts || [];
+  document.getElementById('refreshed').textContent =
+    '更新于 ' + new Date(d.generated_at * 1000).toLocaleTimeString('zh-CN');
+  if (!accs.length) { document.getElementById('cards').innerHTML = '<div class="empty">账号池为空</div>'; return; }
+  const totalRemain = accs.reduce((s,a)=>s+(a.credits?.total_remain||0),0);
+  const checked = accs.filter(a=>a.checkin?.today && a.checkin?.ok).length;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="v">${accs.length}</div><div class="k">账号总数</div></div>
+    <div class="stat"><div class="v">${fmt(totalRemain)}</div><div class="k">总剩余 credits</div></div>
+    <div class="stat"><div class="v">${checked}/${accs.length}</div><div class="k">今日已签到</div></div>`;
+  document.getElementById('cards').innerHTML = accs.map(a => {
+    const c = a.credits || {};
+    const exp = a.token_expires_at ? new Date(a.token_expires_at).toLocaleString('zh-CN') : '?';
+    const ck = a.checkin || {};
+    const pkgs = (c.packages || []).map(p => {
+      const pct = p.size ? Math.round(p.remain * 100 / p.size) : 0;
+      return `<div class="pkg">
+        <div class="row"><span class="name">${p.name}</span>
+        <span class="nums"><b>${fmt(p.remain)}</b> / ${fmt(p.size)} ${p.unit}</span></div>
+        ${barHtml(pct)}
+        <div class="cycle">周期截止 ${p.cycle_end || '—'}</div>
+      </div>`;
+    }).join('');
+    return `<div class="card">
+      <div class="head"><span class="badge">WORKBUDDY</span>${badge(a)}
+        <span class="nick">${a.nickname || '未知账号'}</span></div>
+      <div class="meta">UID <code>${(a.uid||'').slice(0,8)}…</code>
+        · token 到期 ${exp}${a.token_expired ? ' <b style="color:#ef4444">(已过期,将自动刷新)</b>' : ''}
+        · 合计 <b>${fmt(c.total_remain)}</b> / ${fmt(c.total_size)} credits</div>
+      <div class="checkin">今日签到:
+        ${ck.today ? (ck.ok ? `<span class="ok">✅ ${ck.msg || '已签到'}${ck.time ? ' ('+ck.time+')' : ''}</span>`
+                            : `<span class="no">❌ ${ck.msg || '失败'}</span>`)
+                  : '<span class="no">未记录(服务重启后首次签到前)</span>'}</div>
+      ${c.error ? `<div class="err">额度查询失败: ${c.error}</div>` : pkgs}
+    </div>`;
+  }).join('');
+}
+async function load() {
+  try { render(await (await fetch('/v1/account-status')).json()); }
+  catch(e) { document.getElementById('cards').innerHTML = `<div class="empty">加载失败: ${e}</div>`; }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>"""
+
 DEFAULT_MODELS = [
     "deepseek-v4.1-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3", "deepseek-r1",
     "glm-5.2", "glm-5.1", "glm-5v-turbo",
@@ -464,6 +585,109 @@ def health():
         info["accounts"] = pool.snapshot()
         info["accounts_total"] = len(pool)
     return info
+
+
+# ---------------------------------------------------------------------------
+# 账号池可视化面板（/panel + /v1/account-status）
+# ---------------------------------------------------------------------------
+
+CREDIT_URL = "https://www.codebuddy.cn/v2/billing/meter/get-user-resource"
+CHECKIN_STATE_FILE = Path(__file__).parent / "checkin_state.json"
+CREDIT_TTL_SECS = 30
+_credit_cache: dict = {}          # uid -> {"t": epoch, "data": dict}
+_credit_lock = threading.Lock()
+
+
+def _fetch_credits(cred: CredentialManager) -> dict:
+    """查询账号的 credits 资源包（腾讯 get-user-resource），30s TTL 缓存。
+
+    返回 {"total_remain": int, "total_size": int, "packages": [...], "error": str|None}。
+    """
+    try:
+        info = cred.summary()
+        uid = info.get("uid") or cred.path.name
+    except Exception:
+        uid = cred.path.name
+    with _credit_lock:
+        hit = _credit_cache.get(uid)
+        if hit and time.time() - hit["t"] < CREDIT_TTL_SECS:
+            return hit["data"]
+    try:
+        headers = cred.get_headers()
+        with httpx.Client(timeout=15) as c:
+            r = c.post(CREDIT_URL, headers=headers, json={})
+        data = r.json()
+        if data.get("code") != 0:
+            raise RuntimeError(data.get("msg") or f"HTTP {r.status_code}")
+        accounts = (((data.get("data") or {}).get("Response") or {}).get("Data") or {}).get("Accounts") or []
+        now = time.time()
+        packages = []
+        for a in accounts:
+            # 只保留未到期的活跃资源包
+            try:
+                cycle_end_ts = time.mktime(time.strptime(a.get("CycleEndTime", ""), "%Y-%m-%d %H:%M:%S"))
+            except Exception:
+                cycle_end_ts = None
+            if cycle_end_ts is not None and cycle_end_ts < now:
+                continue
+            remain = int(a.get("CapacityRemain") or 0)
+            if remain <= 0:
+                continue   # 已耗尽的历史资源包不在面板展示
+            packages.append({
+                "name": a.get("PackageName") or "资源包",
+                "remain": remain,
+                "used": int(a.get("CapacityUsed") or 0),
+                "size": int(a.get("CapacitySize") or 0),
+                "unit": a.get("CapacityUnit") or "credits",
+                "cycle_end": a.get("CycleEndTime", ""),
+            })
+        packages.sort(key=lambda p: p["remain"], reverse=True)
+        result = {"total_remain": sum(p["remain"] for p in packages),
+                  "total_size": sum(p["size"] for p in packages),
+                  "packages": packages, "error": None}
+    except Exception as e:
+        result = {"total_remain": 0, "total_size": 0, "packages": [], "error": str(e)}
+    with _credit_lock:
+        _credit_cache[uid] = {"t": time.time(), "data": result}
+    return result
+
+
+def _load_checkin_state() -> dict:
+    try:
+        return json.loads(CHECKIN_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+@app.get("/v1/account-status")
+def account_status():
+    """面板数据接口：账号池状态 + credits 额度 + 今日签到状态。"""
+    pool: CredentialPool = CONFIG["pool"]
+    today = time.strftime("%Y-%m-%d")
+    state = _load_checkin_state()
+    accounts = []
+    if pool is not None:
+        for i, cred in enumerate(pool.creds):
+            s = pool.snapshot()[i] if i < len(pool.snapshot()) else {}
+            credits = _fetch_credits(cred)
+            cs = state.get(s.get("uid") or "", {})
+            accounts.append({
+                "nickname": s.get("nickname"),
+                "uid": s.get("uid"),
+                "current": s.get("current", False),
+                "cooldown_remaining": s.get("cooldown_remaining", 0),
+                "token_expired": s.get("token_expired", False),
+                "token_expires_at": s.get("token_expires_at", 0),
+                "checkin": {"today": cs.get("date") == today, "ok": cs.get("ok"),
+                            "msg": cs.get("msg"), "time": cs.get("time")},
+                "credits": credits,
+            })
+    return {"accounts": accounts, "generated_at": int(time.time())}
+
+
+@app.get("/panel")
+def panel():
+    return HTMLResponse(PANEL_HTML)
 
 
 @app.get("/v1/models")

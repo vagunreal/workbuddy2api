@@ -14,6 +14,27 @@ import httpx
 BACKEND = "https://copilot.tencent.com"
 CHECKIN_URL = "https://www.codebuddy.cn/v2/billing/meter/daily-checkin"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
+STATE_FILE = Path(__file__).parent / "checkin_state.json"
+
+
+def record_checkin_state(uid: str, nickname: str, ok: bool, msg: str):
+    """把签到结果写入 checkin_state.json,供 converter /panel 面板展示。"""
+    try:
+        state = {}
+        if STATE_FILE.exists():
+            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        state[uid] = {
+            "nickname": nickname,
+            "date": time.strftime("%Y-%m-%d"),
+            "time": time.strftime("%H:%M:%S"),
+            "ok": ok,
+            "msg": msg,
+        }
+        tmp = STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, STATE_FILE)
+    except Exception as e:
+        print(f"写入签到状态失败: {e}")
 
 def get_auth_dirs() -> list[Path]:
     dirs = []
@@ -122,12 +143,16 @@ def do_checkin(auth_file: Path, processed_uids: set):
         msg = res.get("msg", "")
         if code == 0:
             print(f"🎉 [{nickname}] 每日签到领积分成功！详情: {res.get('data', {})}")
+            record_checkin_state(uid, nickname, True, "签到成功")
         elif "已签到" in msg or code == 10001:
             print(f"ℹ️ [{nickname}] 今日已领过积分（状态正常）。")
+            record_checkin_state(uid, nickname, True, "今日已签到")
         else:
             print(f"⚠️ [{nickname}] 签到返回: {msg} (code={code})")
+            record_checkin_state(uid, nickname, False, f"{msg} (code={code})")
     except Exception as e:
         print(f"❌ [{nickname}] 签到请求异常: {e}")
+        record_checkin_state(uid, nickname, False, f"请求异常: {e}")
 
 def main():
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 正在执行 CodeBuddy 每日签到与积分领取...")
