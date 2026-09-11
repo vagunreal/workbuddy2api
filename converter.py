@@ -22,6 +22,7 @@ codebuddy2openai — 把 CodeBuddy / WorkBuddy 的订阅暴露成标准 OpenAI �
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -361,8 +362,176 @@ class CredentialPool:
 
 
 # ---------------------------------------------------------------------------
-# 模型列表
+# 模型注册表：上游发现 + 内置 + 自定义 + 探测
 # ---------------------------------------------------------------------------
+
+UPSTREAM_MODELS_URL = "https://copilot.tencent.com/console/enterprises/personal/models"
+MODELS_FILE = Path(__file__).parent / "models_registry.json"
+_models_lock = threading.RLock()
+_upstream_models_cache: dict = {"t": 0.0, "models": []}      # 60s TTL
+_probe_state: dict = {"running": False, "done": 0, "total": 0, "current": ""}
+
+
+def _load_registry() -> dict:
+    try:
+        return json.loads(MODELS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"custom": [], "disabled": [], "probe": {}}
+
+
+def _save_registry(reg: dict):
+    """写盘;不加锁——调用方负责持有 _models_lock(RLock,可重入)。"""
+    tmp = MODELS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(reg, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, MODELS_FILE)
+
+
+def _fetch_upstream_models(cred: CredentialManager) -> list[str]:
+    """从上游 /console/enterprises/personal/models 拉取真实可用模型（60s TTL，取所有 agent 的并集）。"""
+    with _models_lock:
+        if time.time() - _upstream_models_cache["t"] < 60:
+            return _upstream_models_cache["models"]
+    try:
+        headers = cred.get_headers()
+        with httpx.Client(timeout=15) as c:
+            r = c.get(UPSTREAM_MODELS_URL, headers=headers)
+        data = r.json()
+        models: list[str] = []
+        if data.get("code") == 0:
+            for agent in ((data.get("data") or {}).get("agents") or []):
+                for m in agent.get("models") or []:
+                    if m not in models:
+                        models.append(m)
+        _upstream_models_cache.update({"t": time.time(), "models": models})
+    except Exception:
+        _upstream_models_cache.update({"t": time.time()})
+    return _upstream_models_cache["models"]
+
+
+def _default_specs() -> dict:
+    """客户端接入所需的模型规格默认值(面板可逐模型编辑)。"""
+    return {"context_length": 131072, "max_output_tokens": 8192,
+            "input": ["text"], "output": ["text"]}
+
+
+def _model_specs(reg: dict, name: str) -> dict:
+    merged = _default_specs()
+    merged.update((reg.get("specs") or {}).get(name) or {})
+    return merged
+
+
+def _all_models(cred: CredentialManager | None) -> list[dict]:
+    """合并上游/内置/自定义模型，标注来源与规格，过滤禁用项。顺序：上游 → 内置 → 自定义。"""
+    reg = _load_registry()
+    disabled = set(reg.get("disabled") or [])
+    out: list[dict] = []
+    seen: set[str] = set()
+    upstream = _fetch_upstream_models(cred) if cred is not None else []
+    for m in upstream:
+        if m not in disabled and m not in seen:
+            seen.add(m)
+            out.append({"name": m, "source": "上游", "specs": _model_specs(reg, m)})
+    for m in DEFAULT_MODELS:
+        if m not in disabled and m not in seen:
+            seen.add(m)
+            out.append({"name": m, "source": "内置", "specs": _model_specs(reg, m)})
+    for c in reg.get("custom") or []:
+        if c["name"] not in disabled and c["name"] not in seen:
+            seen.add(c["name"])
+            out.append({"name": c["name"], "source": "自定义", "specs": _model_specs(reg, c["name"])})
+    return out
+
+
+def _resolve_model(raw: str) -> str:
+    """客户端模型名 → 上游真实模型名：内置别名 → 自定义别名 → 原样透传。"""
+    reg = _load_registry()
+    for c in reg.get("custom") or []:
+        if c.get("alias") and c["alias"] == raw:
+            return c["name"]
+    return MODEL_ALIASES.get(raw, raw)
+
+
+def probe_model(cred: CredentialManager, model: str) -> dict:
+    """对单个模型发一次最小真实请求，测可用性/首字延迟/总延迟。"""
+    reg = _load_registry()
+    headers = cred.get_headers()
+    body = {"model": model, "messages": [{"role": "user", "content": "只回复两个字:正常"}],
+            "stream": True, "max_tokens": 16}
+    result: dict = {"ok": False, "error": None, "ttfb_ms": None, "total_ms": None,
+                    "resp_model": None, "finish_reason": None, "reply": "", "tested_at": int(time.time())}
+    t0 = time.time()
+    try:
+        with httpx.Client(timeout=90) as c:
+            with c.stream("POST", f"{BACKEND}/v2/chat/completions", headers=headers, json=body) as r:
+                if r.status_code != 200:
+                    raw = r.read()
+                    result["error"] = f"HTTP {r.status_code}: {_truncate(raw.decode('utf-8','replace'), 200)}"
+                else:
+                    got_first = False
+                    finish = None
+                    parts: list[str] = []
+                    resp_model = None
+                    for line in r.iter_lines():
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(payload)
+                        except Exception:
+                            continue
+                        resp_model = obj.get("model") or resp_model
+                        for ch in obj.get("choices") or []:
+                            if ch.get("finish_reason"):
+                                finish = ch["finish_reason"]
+                            content = (ch.get("delta") or {}).get("content")
+                            if content:
+                                parts.append(content)
+                                if not got_first:
+                                    got_first = True
+                                    result["ttfb_ms"] = int((time.time() - t0) * 1000)
+                    result.update({"ok": True, "total_ms": int((time.time() - t0) * 1000),
+                                   "resp_model": resp_model, "finish_reason": finish,
+                                   "reply": "".join(parts)[:40]})
+    except Exception as e:
+        result["error"] = str(e)
+    result["elapsed_hint"] = f"{result['ttfb_ms'] or '-'}ms 首字 / {result['total_ms'] or '-'}ms 总计" if result["ok"] else None
+    with _models_lock:
+        reg.setdefault("probe", {})[model] = result
+        _save_registry(reg)
+    return result
+
+
+def _probe_all_worker():
+    cred = (CONFIG["pool"] or CredentialPool([])).get_current()
+    if cred is None:
+        _probe_state.update({"running": False})
+        return
+    models = [m["name"] for m in _all_models(cred)]
+    _probe_state.update({"running": True, "done": 0, "total": len(models), "current": ""})
+    for m in models:
+        if not _probe_state.get("running"):
+            break
+        _probe_state["current"] = m
+        try:
+            probe_model(cred, m)
+        except Exception:
+            pass
+        _probe_state["done"] += 1
+    _probe_state.update({"running": False, "current": ""})
+
+
+def _api_info() -> dict:
+    key = CONFIG.get("api_key") or ""
+    host = CONFIG.get("host") or "127.0.0.1"
+    return {
+        "base_url": f"http://{host}:{CONFIG.get('port', 8787)}/v1",
+        "api_key": key,
+        "auth_enabled": bool(key),
+    }
+
 
 PANEL_HTML = """<!doctype html>
 <html lang="zh-CN">
@@ -432,6 +601,60 @@ PANEL_HTML = """<!doctype html>
   .sw { background:#f3f4f6; color:#374151; border:1px solid var(--line); border-radius:8px;
         padding:5px 12px; font-size:12px; cursor:pointer; margin-left:auto; }
   .sw:hover { background:#e5e7eb; }
+  /* ---- 模型管理板块 ---- */
+  .sec-h { font-size:19px; font-weight:700; margin:30px 0 4px; }
+  .sec-sub { font-size:12px; color:var(--muted); margin-bottom:14px; }
+  .kv { display:flex; align-items:center; gap:10px; margin-bottom:9px; font-size:13px; flex-wrap:wrap; }
+  .kv > span { color:var(--muted); width:64px; flex-shrink:0; }
+  .kv code { background:#f3f4f6; padding:5px 11px; border-radius:6px; word-break:break-all; }
+  .kv .note { color:var(--muted); font-size:12px; }
+  .mini { background:#f3f4f6; color:#374151; border:1px solid var(--line); border-radius:6px;
+          padding:3px 10px; font-size:12px; cursor:pointer; }
+  .mini:hover { background:#e5e7eb; }
+  .mini.warn { color:#b91c1c; }
+  .mini2 { background:#111827; color:#fff; border:0; border-radius:8px; padding:8px 13px;
+           font-size:12px; cursor:pointer; }
+  .toolbar input { border:1px solid var(--line); border-radius:8px; padding:8px 11px;
+                   font-size:13px; width:220px; }
+  .toolbar input.short { width:110px; }
+  .model-list { border:1px solid var(--line); border-radius:12px; background:#fafbfc;
+                max-height:420px; overflow-y:auto; padding:5px 6px; }
+  .pkg-list::-webkit-scrollbar, .model-list::-webkit-scrollbar { width:6px; }
+  .pkg-list::-webkit-scrollbar-track, .model-list::-webkit-scrollbar-track { background:transparent; }
+  .pkg-list::-webkit-scrollbar-thumb, .model-list::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
+  .pkg-list::-webkit-scrollbar-thumb:hover, .model-list::-webkit-scrollbar-thumb:hover { background:#9ca3af; }
+  .mrow { display:grid; grid-template-columns:minmax(220px,1.1fr) minmax(200px,1.4fr) auto;
+          gap:12px; align-items:center; padding:8px 12px; border-radius:8px; }
+  .mrow + .mrow { border-top:1px solid #eef0f2; }
+  .mrow:hover { background:#f1f3f5; }
+  .mrow .mname { min-width:0; display:flex; align-items:center; gap:7px; }
+  .mrow .mname .t { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mrow.off .mname .t { text-decoration:line-through; color:var(--muted); font-weight:400; }
+  .badge.src { background:#f0fdf4; color:#15803d; font-size:10px; padding:2px 7px; }
+  .st { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .st.ok { color:#16a34a; } .st.bad { color:var(--red); cursor:help; }
+  .st.na { color:var(--muted); } .st.off { color:var(--muted); }
+  .ops { display:flex; gap:6px; justify-content:flex-end; }
+  #probe-state { color:var(--orange); font-size:12px; font-weight:600; }
+  /* 添加表单 + 编辑展开 */
+  .add-form { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
+  .fe { display:flex; flex-direction:column; gap:4px; }
+  .fe > span { font-size:11px; color:var(--muted); }
+  .fe input[type=number], .fe input[type=text], .fe > input { border:1px solid var(--line);
+      border-radius:8px; padding:8px 11px; font-size:13px; width:150px; }
+  .fe input#new-model, .fe input#new-alias { width:170px; }
+  .mrow-edit { background:#f8fafc; border:1px dashed var(--line); border-radius:10px;
+               padding:12px 14px; margin:6px 4px 10px; display:flex; gap:18px;
+               flex-wrap:wrap; align-items:flex-end; }
+  .chip { display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line);
+          background:#fff; border-radius:7px; padding:5px 9px; font-size:12px;
+          cursor:pointer; user-select:none; }
+  .chip:has(input:checked) { border-color:var(--green); background:#f0fdf4; }
+  .chip input { accent-color:var(--green); margin:0; }
+  .spec { font-size:12px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .spec b { color:var(--text); font-weight:600; }
+  .tag { background:#eef2ff; color:#4338ca; border-radius:5px; padding:1px 6px; font-size:11px; }
+  .ps { margin-left:6px; font-size:11px; }
 </style>
 </head>
 <body>
@@ -444,6 +667,30 @@ PANEL_HTML = """<!doctype html>
   </div>
   <div class="stats" id="stats"></div>
   <div id="cards"><div class="empty">加载中…</div></div>
+
+  <div class="sec-h">模型管理</div>
+  <div class="sec-sub">自动发现上游可用模型 · 每个模型可编辑参数规格(客户端添加模型时照抄) · 支持自定义添加/禁用/删除</div>
+  <div class="card">
+    <div class="kv"><span>Base URL</span><code id="api-url">—</code>
+      <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
+    <div class="kv"><span>API Key</span><code id="api-key">—</code>
+      <button class="mini" onclick="copyTxt('api-key')">复制</button>
+      <span class="note" id="api-note"></span></div>
+    <div class="kv"><span class="note">所有模型共享上方账号池的额度;自定义别名可直接作为 model 参数传给任何客户端</span></div>
+  </div>
+  <div class="card">
+    <div class="add-form">
+      <div class="fe"><span>模型 ID</span><input id="new-model" placeholder="如 glm-5.4"></div>
+      <div class="fe"><span>别名(可选)</span><input id="new-alias" placeholder="映射到模型 ID"></div>
+      <div class="fe"><span>上下文窗口</span><input id="new-ctx" type="number" value="131072"></div>
+      <div class="fe"><span>最大输出 Token</span><input id="new-out" type="number" value="8192"></div>
+      <button class="mini2" onclick="addCustom()">+ 添加模型</button>
+      <span style="flex:1"></span>
+      <span id="probe-state"></span>
+      <button id="probe-all-btn" onclick="probeAll()">可用性全面检测</button>
+    </div>
+    <div class="model-list" id="model-list"><div class="empty">加载中…</div></div>
+  </div>
 </div>
 <script>
 const fmt = n => (n ?? 0).toLocaleString('en-US');
@@ -519,7 +766,125 @@ async function switchTo(uid, btn) {
   } catch(e) { alert('切换失败: ' + e.message); }
   load();
 }
+
+/* ---- 模型管理 ---- */
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+let editingName = null;   // 当前展开参数编辑的模型名(编辑期间冻结列表刷新)
+const fmtK = n => !n ? '—' : n >= 1048576 ? (n/1048576).toFixed(n%1048576 ? 1 : 0) + 'M' : Math.round(n/1024) + 'K';
+const IN_LAB = {text:'文本', image:'图片', video:'视频', pdf:'PDF'};
+function specSummary(s) {
+  if (!s) return '—';
+  const inp = (s.input || []).map(x => IN_LAB[x] || x).join('/');
+  const out = (s.output || []).map(x => IN_LAB[x] || x).join('/');
+  return `<span class="spec"><span><b>${fmtK(s.context_length)}</b> 上下文</span>·<span><b>${fmtK(s.max_output_tokens)}</b> 最大输出</span>·<span>输入 <span class="tag">${inp || '—'}</span></span>·<span>输出 <span class="tag">${out || '—'}</span></span></span>`;
+}
+function editFormHtml(name, s) {
+  const chk = (g, v, lab) =>
+    `<label class="chip"><input type="checkbox" data-g="${g}" value="${v}" ${s[g]?.includes(v) ? 'checked' : ''}> ${lab}</label>`;
+  return `<div class="mrow-edit">
+    <div class="fe"><span>上下文窗口</span><input id="e-ctx" type="number" value="${s.context_length}"></div>
+    <div class="fe"><span>最大输出 Token</span><input id="e-out" type="number" value="${s.max_output_tokens}"></div>
+    <div class="fe"><span>输入类型</span><div style="display:flex; gap:6px;">${['text:文本','image:图片','video:视频','pdf:PDF'].map(x => { const [v,l] = x.split(':'); return chk('input', v, l); }).join('')}</div></div>
+    <div class="fe"><span>输出类型</span><div style="display:flex; gap:6px;">${chk('output','text','文本')}</div></div>
+    <div class="fe"><span>&nbsp;</span><div style="display:flex; gap:8px;">
+      <button class="mini2" onclick="saveSpecs('${esc(name)}')">保存参数</button>
+      <button class="mini" onclick="toggleEdit('${esc(name)}')">取消</button></div></div>
+  </div>`;
+}
+async function loadModels() {
+  let d;
+  try { d = await (await fetch('/v1/models-info')).json(); }
+  catch(e) { return; }
+  const api = d.api || {};
+  document.getElementById('api-url').textContent = api.base_url || '—';
+  const k = document.getElementById('api-key');
+  k.textContent = api.auth_enabled ? api.api_key : '(未启用鉴权,客户端留空即可)';
+  document.getElementById('api-note').textContent = api.auth_enabled ? '' : '如需启用鉴权,启动时加 --api-key your-secret';
+  const ps = d.probe_state || {};
+  document.getElementById('probe-state').textContent =
+    ps.running ? `⏳ 可用性检测中 ${ps.done}/${ps.total} · ${ps.current || ''}` : '';
+  document.getElementById('probe-all-btn').disabled = !!ps.running;
+  if (editingName) return;   // 编辑展开期间冻结列表,避免输入丢失
+  const rows = (d.models || []).map(m => {
+    const p = m.probe;
+    let ps_badge = '';
+    if (p) ps_badge = p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>'
+                           : `<span class="ps" title="${esc(p.error)}">❌</span>`;
+    const op = m.disabled
+      ? `<button class="mini" onclick="toggleModel('${esc(m.name)}')">恢复</button>`
+      : `<button class="mini" onclick="toggleEdit('${esc(m.name)}')">编辑</button>
+         <button class="mini" onclick="probeOne('${esc(m.name)}', this)">测</button>
+         <button class="mini warn" onclick="toggleModel('${esc(m.name)}')">${m.source === '自定义' ? '删' : '禁'}</button>`;
+    const src = m.source ? `<span class="badge src">${m.source}</span>` : '';
+    let row = `<div class="mrow${m.disabled ? ' off' : ''}" id="mrow-${esc(m.name)}">
+      <div class="mname"><span class="t" title="${esc(m.name)}">${m.name}</span>${src}${ps_badge}</div>
+      <div>${specSummary(m.specs)}</div>
+      <div class="ops">${op}</div></div>`;
+    if (editingName === m.name && !m.disabled) row += editFormHtml(m.name, m.specs || {});
+    return row;
+  }).join('');
+  document.getElementById('model-list').innerHTML =
+    rows || '<div class="empty">模型列表为空</div>';
+  if (ps.running) setTimeout(loadModels, 2000);   // 探测进行中:2s 轮询进度
+}
+function toggleEdit(name) {
+  editingName = (editingName === name) ? null : name;
+  loadModels();
+}
+async function saveSpecs(name) {
+  const get = g => [...document.querySelectorAll('#model-list .mrow-edit input[data-g="' + g + '"]:checked')].map(i => i.value);
+  const specs = {
+    context_length: parseInt(document.getElementById('e-ctx').value) || 131072,
+    max_output_tokens: parseInt(document.getElementById('e-out').value) || 8192,
+    input: get('input').length ? get('input') : ['text'],
+    output: get('output').length ? get('output') : ['text'],
+  };
+  try {
+    const r = await fetch('/v1/models/specs', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, specs})});
+    if (!r.ok) throw new Error((await r.json()).error?.message || r.status);
+  } catch(e) { alert('保存失败: ' + e.message); return; }
+  editingName = null;
+  loadModels();
+}
+async function probeOne(name, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    await fetch('/v1/models/probe', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({model: name})});
+  } catch(e) { alert('探测失败: ' + e.message); }
+  loadModels();
+}
+async function probeAll() {
+  try { await fetch('/v1/models/probe-all', {method:'POST'}); } catch(e) { alert(e.message); }
+  loadModels();
+}
+async function addCustom() {
+  const name = document.getElementById('new-model').value.trim();
+  const alias = document.getElementById('new-alias').value.trim();
+  if (!name) return alert('请输入模型 ID');
+  const body = {name, alias, specs: {
+    context_length: parseInt(document.getElementById('new-ctx').value) || 131072,
+    max_output_tokens: parseInt(document.getElementById('new-out').value) || 8192,
+    input: ['text'], output: ['text'],
+  }};
+  const r = await fetch('/v1/models/custom', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (!r.ok) return alert((await r.json()).error?.message || '添加失败');
+  document.getElementById('new-model').value = '';
+  document.getElementById('new-alias').value = '';
+  loadModels();
+}
+async function toggleModel(name) {
+  await fetch('/v1/models/delete', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+  loadModels();
+}
+function copyTxt(id) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent.trim());
+}
 load();
+loadModels();
 setInterval(load, 30000);
 </script>
 </body>
@@ -767,6 +1132,143 @@ async def account_switch(request: Request):
     return {"ok": True, "current_uid": uid, "accounts": pool.snapshot()}
 
 
+# ---------------------------------------------------------------------------
+# 模型管理端点：列表/探测/自定义增删/启停
+# ---------------------------------------------------------------------------
+
+def _cred_for_models() -> CredentialManager | None:
+    pool: CredentialPool | None = CONFIG["pool"]
+    return pool.get_current() if pool else None
+
+
+@app.get("/v1/models-info")
+def models_info():
+    """面板模型管理数据：合并模型列表 + 探测缓存 + 探测进度 + API 接入信息。"""
+    cred = _cred_for_models()
+    reg = _load_registry()
+    models = _all_models(cred)
+    probes = reg.get("probe") or {}
+    for m in models:
+        m["probe"] = probes.get(m["name"])
+        m["disabled"] = False
+    for name in reg.get("disabled") or []:
+        models.append({"name": name, "source": "", "disabled": True, "probe": probes.get(name)})
+    return {"models": models, "probe_state": dict(_probe_state),
+            "api": _api_info(), "custom": reg.get("custom") or []}
+
+
+@app.post("/v1/models/custom")
+async def models_add_custom(request: Request):
+    """添加自定义模型。请求体: {"name": "模型名", "alias": "可选别名"}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    name = ((payload or {}).get("name") or "").strip()
+    alias = ((payload or {}).get("alias") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail={"error": {"message": "name is required", "type": "invalid_request_error"}})
+    reg = _load_registry()
+    reg.setdefault("custom", [])
+    if any(c["name"] == name for c in reg["custom"]):
+        raise HTTPException(status_code=409, detail={"error": {"message": f"模型已存在: {name}", "type": "conflict"}})
+    reg["custom"].append({"name": name, "alias": alias, "added_at": int(time.time())})
+    specs = (payload or {}).get("specs")
+    if isinstance(specs, dict) and specs:
+        merged = _default_specs()
+        merged.update(specs)
+        reg.setdefault("specs", {})[name] = merged
+    reg["disabled"] = [d for d in (reg.get("disabled") or []) if d != name]
+    _save_registry(reg)
+    _log(f"+ 添加自定义模型: {name}" + (f" (别名 {alias})" if alias else ""))
+    return {"ok": True, "custom": reg["custom"]}
+
+
+@app.post("/v1/models/delete")
+async def models_delete(request: Request):
+    """删除自定义模型；对内置/上游模型则是禁用⇄恢复开关。请求体: {"name": "..."}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    name = ((payload or {}).get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail={"error": {"message": "name is required", "type": "invalid_request_error"}})
+    reg = _load_registry()
+    before = len(reg.get("custom") or [])
+    reg["custom"] = [c for c in (reg.get("custom") or []) if c["name"] != name]
+    if len(reg["custom"]) < before:
+        reg["probe"] = {k: v for k, v in (reg.get("probe") or {}).items() if k != name}
+        (reg.get("specs") or {}).pop(name, None)
+        _save_registry(reg)
+        _log(f"- 删除自定义模型: {name}")
+        return {"ok": True, "action": "deleted", "custom": reg["custom"]}
+    disabled = reg.get("disabled") or []
+    if name in disabled:
+        reg["disabled"] = [d for d in disabled if d != name]
+        action = "enabled"
+    else:
+        reg["disabled"] = disabled + [name]
+        action = "disabled"
+    _save_registry(reg)
+    _log(f"⏻ 模型{action}: {name}")
+    return {"ok": True, "action": action, "disabled": reg["disabled"]}
+
+
+@app.post("/v1/models/specs")
+async def models_specs(request: Request):
+    """更新模型参数规格。请求体: {"name": "...", "specs": {"context_length":..., "max_output_tokens":..., "input":[...], "output":[...]}}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    name = ((payload or {}).get("name") or "").strip()
+    specs = (payload or {}).get("specs")
+    if not name or not isinstance(specs, dict):
+        raise HTTPException(status_code=400, detail={"error": {"message": "name and specs are required", "type": "invalid_request_error"}})
+    reg = _load_registry()
+    merged = _default_specs()
+    for k in ("context_length", "max_output_tokens"):
+        try:
+            merged[k] = int(specs.get(k) or merged[k])
+        except (TypeError, ValueError):
+            pass
+    for k in ("input", "output"):
+        v = specs.get(k)
+        if isinstance(v, list) and v:
+            merged[k] = [str(x) for x in v]
+    reg.setdefault("specs", {})[name] = merged
+    _save_registry(reg)
+    return {"ok": True, "name": name, "specs": merged}
+
+
+@app.post("/v1/models/probe")
+async def models_probe(request: Request):
+    """探测单个模型（发一次最小真实请求，消耗少量 credits）。请求体: {"model": "..."}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    model = ((payload or {}).get("model") or "").strip()
+    cred = _cred_for_models()
+    if cred is None:
+        raise HTTPException(status_code=503, detail={"error": {"message": "账号池为空", "type": "auth_error"}})
+    result = await asyncio.to_thread(probe_model, cred, model)
+    return {"ok": True, "model": model, "result": result}
+
+
+@app.post("/v1/models/probe-all")
+async def models_probe_all():
+    """后台顺序探测全部模型；进度通过 /v1/models-info 的 probe_state 轮询。"""
+    if _probe_state.get("running"):
+        return {"ok": True, "already_running": True, "state": dict(_probe_state)}
+    cred = _cred_for_models()
+    if cred is None:
+        raise HTTPException(status_code=503, detail={"error": {"message": "账号池为空", "type": "auth_error"}})
+    threading.Thread(target=_probe_all_worker, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
 @app.get("/panel")
 def panel():
     return HTMLResponse(PANEL_HTML)
@@ -776,8 +1278,9 @@ def panel():
 def list_models(authorization: Optional[str] = Header(default=None),
                 x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key")):
     _check_auth(authorization, x_api_key)
-    data = [{"id": m, "object": "model", "created": 1700000000, "owned_by": "codebuddy"}
-            for m in DEFAULT_MODELS]
+    models = _all_models(_cred_for_models())
+    data = [{"id": m["name"], "object": "model", "created": 1700000000,
+             "owned_by": "codebuddy"} for m in models]
     return {"object": "list", "data": data}
 
 
@@ -801,7 +1304,7 @@ async def chat_completions(request: Request,
     client_wants_stream = bool(payload.get("stream"))
     body = {k: payload[k] for k in PASSTHROUGH_BODY_KEYS if k in payload}
     raw_model = body.get("model", "auto")
-    body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
+    body["model"] = _resolve_model(raw_model)
     # 后端只支持流式：始终以 stream=True 调后端，非流式由转换器聚合
     body["stream"] = True
     if "stream_options" not in body:
@@ -1210,7 +1713,7 @@ async def create_response(request: Request,
 
     chat_body, projection_stats = project_responses_chat_body(chat_body)
     raw_model = chat_body.get("model", "auto")
-    chat_body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
+    chat_body["model"] = _resolve_model(raw_model)
     chat_body["stream"] = True
     if "stream_options" not in chat_body:
         chat_body["stream_options"] = {"include_usage": True}
@@ -1336,7 +1839,7 @@ async def create_message(request: Request,
         raise HTTPException(status_code=400, detail={"error": {"message": f"request conversion error: {e}", "type": "invalid_request_error"}})
 
     raw_model = chat_body.get("model", "auto")
-    chat_body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
+    chat_body["model"] = _resolve_model(raw_model)
     chat_body["stream"] = True
     if "stream_options" not in chat_body:
         chat_body["stream_options"] = {"include_usage": True}
@@ -1478,6 +1981,7 @@ def main():
     # --log 直接指定文件路径即开启；不传则不记
     CONFIG["log_path"] = args.log if args.log else os.environ.get("CODEBUDDY2OPENAI_LOG")
     CONFIG["pool"] = CredentialPool(find_auth_files())
+    CONFIG["port"] = args.port
 
     if not args.skip_check:
         preflight()

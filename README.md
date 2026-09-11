@@ -26,6 +26,7 @@
 | token 自动刷新 | 每个账号临近过期自动调 `/v2/plugin/auth/token/refresh` 刷新并原子回写凭据文件 |
 | 三协议兼容 | OpenAI Chat / OpenAI Responses / Anthropic Messages，均支持流式与工具调用 |
 | 脱敏 | `--desensitize` 对 system 提示词做零宽字符脱敏 + 压缩，缓解后端内容审核误拦 |
+| 模型管理 | 自动从上游发现可用模型；每个模型可编辑参数规格(上下文窗口/最大输出/输入输出类型)；自定义模型与别名；一键可用性探测 |
 
 ---
 
@@ -150,9 +151,15 @@ codex --profile workbuddy "your task"
 | POST | `/v1/messages/count_tokens` | Anthropic token 计数（stub） |
 | GET  | `/v1/models` | 模型列表 |
 | GET  | `/health` | 健康检查 + 账号池概览 |
-| GET  | `/panel` | 可视化账号池面板（网页） |
+| GET  | `/panel` | 可视化面板：账号池额度 + 模型管理 |
 | GET  | `/v1/account-status` | 面板数据接口：账号状态 + credits 额度 + 签到状态 |
 | POST | `/v1/account-switch` | 手动切换当前账号，请求体 `{"uid": "<账号uid>"}` |
+| GET  | `/v1/models-info` | 面板模型管理数据：模型列表(含参数规格) + 探测进度 + API 接入信息 |
+| POST | `/v1/models/custom` | 添加自定义模型，`{"name", "alias"?, "specs"?}` |
+| POST | `/v1/models/specs` | 更新模型参数规格，`{"name", "specs": {context_length, max_output_tokens, input, output}}` |
+| POST | `/v1/models/delete` | 删除自定义模型 / 禁用⇄恢复内置模型，`{"name"}` |
+| POST | `/v1/models/probe` | 可用性探测单个模型，`{"model"}` |
+| POST | `/v1/models/probe-all` | 后台顺序探测全部模型(进度见 `/v1/models-info`) |
 
 ### 账号池调度细节
 
