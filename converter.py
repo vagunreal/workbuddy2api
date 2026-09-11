@@ -705,6 +705,14 @@ PANEL_HTML = """<!doctype html>
   .mtag { border:1px solid; border-radius:5px; padding:1px 6px; font-size:10px; font-weight:600; }
   .ps { font-size:11px; }
   .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
+  /* ---- 页签导航 ---- */
+  .tabs { display:flex; gap:4px; margin-bottom:0; border-bottom:2px solid var(--line); }
+  .tab { background:transparent; color:var(--muted); border:0; border-radius:10px 10px 0 0;
+         padding:11px 22px; font-size:14px; cursor:pointer; font-weight:500;
+         border-bottom:2px solid transparent; margin-bottom:-2px; }
+  .tab:hover { color:var(--text); background:rgba(0,0,0,.035); }
+  .tab.act { color:#4338ca; font-weight:700; border-bottom:2px solid #4338ca; }
+  #page-home, #page-models, #page-api { margin-top:22px; }
   /* 接口页 */
   pre.curl { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px;
              font-size:12.5px; line-height:1.7; white-space:pre-wrap; word-break:break-all;
