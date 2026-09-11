@@ -674,42 +674,39 @@ PANEL_HTML = """<!doctype html>
   .toolbar input { border:1px solid var(--line); border-radius:8px; padding:8px 11px;
                    font-size:13px; width:220px; }
   .toolbar input.short { width:110px; }
-  .model-list { border:1px solid var(--line); border-radius:12px; background:#fafbfc;
-                max-height:420px; overflow-y:auto; padding:5px 6px; }
-  .pkg-list::-webkit-scrollbar, .model-list::-webkit-scrollbar { width:6px; }
-  .pkg-list::-webkit-scrollbar-track, .model-list::-webkit-scrollbar-track { background:transparent; }
-  .pkg-list::-webkit-scrollbar-thumb, .model-list::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
-  .pkg-list::-webkit-scrollbar-thumb:hover, .model-list::-webkit-scrollbar-thumb:hover { background:#9ca3af; }
-  .mrow { display:grid; grid-template-columns:minmax(220px,1.1fr) minmax(200px,1.4fr) auto;
-          gap:12px; align-items:center; padding:8px 12px; border-radius:8px; }
-  .mrow + .mrow { border-top:1px solid #eef0f2; }
-  .mrow:hover { background:#f1f3f5; }
-  .mrow .mname { min-width:0; display:flex; align-items:center; gap:7px; }
-  .mrow .mname .t { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .mrow.off .mname .t { text-decoration:line-through; color:var(--muted); font-weight:400; }
+  .model-list { }
+  /* ---- 模型页:厂商卡片 ---- */
+  .vcard { background:var(--card); border:1px solid var(--line); border-radius:14px;
+           box-shadow:0 1px 3px rgba(0,0,0,.04); margin-bottom:16px; overflow:hidden; }
+  .vhead { display:flex; align-items:center; gap:10px; padding:14px 18px 10px; }
+  .vd { width:30px; height:30px; border-radius:9px; color:#fff; font-size:14px; font-weight:800;
+        display:flex; align-items:center; justify-content:center; }
+  .vname { font-size:15px; font-weight:700; }
+  .vg-n { background:#f3f4f6; color:var(--muted); border-radius:99px; font-size:11px;
+          padding:2px 9px; font-weight:600; }
+  .vbody { padding:0 12px 8px; }
+  .mrow { display:flex; align-items:center; gap:14px; padding:10px 6px; }
+  .mrow + .mrow { border-top:1px solid #f3f4f6; }
+  .mrow.off { opacity:.55; }
+  .mmain { flex:1; min-width:0; }
+  .mtitle { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .mtitle .t { font-size:13.5px; font-weight:600; }
+  .mspec { font-size:11.5px; color:var(--muted); margin-top:3px; }
+  .mrate { min-width:66px; text-align:center; border-radius:9px; padding:5px 10px;
+           font-size:14px; font-weight:800; white-space:nowrap; }
+  .mrate small { display:block; font-size:9.5px; font-weight:500; opacity:.75; }
+  .rate-lo { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+  .rate-mid { background:#fffbeb; color:#b45309; border:1px solid #fde68a; }
+  .rate-hi { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
   .badge.src { background:#f0fdf4; color:#15803d; font-size:10px; padding:2px 7px; }
-  .st { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .st.ok { color:#16a34a; } .st.bad { color:var(--red); cursor:help; }
-  .st.na { color:var(--muted); } .st.off { color:var(--muted); }
-  .ops { display:flex; gap:6px; justify-content:flex-end; }
-  #probe-state { color:var(--orange); font-size:12px; font-weight:600; }
-  /* ---- v2 页签 ---- */
-  .tabs { display:flex; gap:8px; margin-bottom:20px; }
-  .tab { background:#fff; color:#374151; border:1px solid var(--line); border-radius:10px;
-         padding:9px 20px; font-size:14px; cursor:pointer; font-weight:500; }
-  .tab.act { background:#111827; color:#fff; border-color:#111827; }
-  .toolbar select { border:1px solid var(--line); border-radius:8px; padding:7px 9px;
-                    font-size:13px; background:#fff; }
-  pre.curl { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px;
-             font-size:12px; overflow-x:auto; white-space:pre-wrap; word-break:break-all;
-             font-family:ui-monospace,Consolas,monospace; max-width:760px; }
-  /* 添加表单 + 编辑展开 */
-  .add-form { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
+  .mtag { border:1px solid; border-radius:5px; padding:1px 6px; font-size:10px; font-weight:600; }
+  .ps { font-size:11px; }
+  .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
+  /* 编辑展开 */
   .fe { display:flex; flex-direction:column; gap:4px; }
   .fe > span { font-size:11px; color:var(--muted); }
-  .fe input[type=number], .fe input[type=text], .fe > input { border:1px solid var(--line);
+  .fe input[type=number], .fe input[type=text] { border:1px solid var(--line);
       border-radius:8px; padding:8px 11px; font-size:13px; width:150px; }
-  .fe input#new-model, .fe input#new-alias { width:170px; }
   .mrow-edit { background:#f8fafc; border:1px dashed var(--line); border-radius:10px;
                padding:12px 14px; margin:6px 4px 10px; display:flex; gap:18px;
                flex-wrap:wrap; align-items:flex-end; }
@@ -718,10 +715,11 @@ PANEL_HTML = """<!doctype html>
           cursor:pointer; user-select:none; }
   .chip:has(input:checked) { border-color:var(--green); background:#f0fdf4; }
   .chip input { accent-color:var(--green); margin:0; }
-  .spec { font-size:12px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .spec b { color:var(--text); font-weight:600; }
-  .tag { background:#eef2ff; color:#4338ca; border-radius:5px; padding:1px 6px; font-size:11px; }
-  .ps { margin-left:6px; font-size:11px; }
+  .vgroup { margin-bottom:6px; }
+  .vg-title { font-size:13px; font-weight:700; padding:8px 12px 6px; color:#374151;
+              display:flex; align-items:center; gap:8px; }
+  .vg-n { background:#e5e7eb; color:#6b7280; border-radius:99px; font-size:10px;
+          padding:1px 8px; font-weight:600; }
 </style>
 </head>
 <body>
@@ -736,8 +734,6 @@ PANEL_HTML = """<!doctype html>
   <div id="page-home">
   <div class="toolbar">
     <span class="auto" id="auto">30s 自动刷新</span>
-    <span class="auto">折算模型:</span>
-    <select id="rate-model" onchange="render()"></select>
     <span style="flex:1"></span>
     <button onclick="load()">刷新全部账号</button>
   </div>
@@ -748,13 +744,7 @@ PANEL_HTML = """<!doctype html>
   <div id="page-models" style="display:none">
   <div class="sec-sub" style="margin-top:4px;">自动发现上游可用模型 · 每个模型可编辑参数规格(客户端添加模型时照抄) · 支持自定义添加/禁用/删除</div>
   <div class="card">
-    <div class="add-form">
-      <div class="fe"><span>模型 ID</span><input id="new-model" placeholder="如 glm-5.4"></div>
-      <div class="fe"><span>别名(可选)</span><input id="new-alias" placeholder="映射到模型 ID"></div>
-      <div class="fe"><span>上下文窗口</span><input id="new-ctx" type="number" value="131072"></div>
-      <div class="fe"><span>最大输出 Token</span><input id="new-out" type="number" value="8192"></div>
-      <button class="mini2" onclick="addCustom()">+ 添加模型</button>
-      <span style="flex:1"></span>
+    <div class="toolbar" style="justify-content:flex-end; margin:0 0 10px;">
       <span id="probe-state"></span>
       <button id="probe-all-btn" onclick="probeAll()">可用性全面检测</button>
     </div>
@@ -799,18 +789,10 @@ function render() {
   if (!accs.length) { document.getElementById('cards').innerHTML = '<div class="empty">账号池为空</div>'; return; }
   const totalRemain = accs.reduce((s,a)=>s+(a.credits?.total_remain||0),0);
   const checked = accs.filter(a=>a.checkin?.today && a.checkin?.ok).length;
-  const sel = document.getElementById('rate-model');
-  const mm = (window.latestModels || []).find(x => x.name === (sel && sel.value));
-  const rate = mm && mm.meta && mm.meta.credits ? parseFloat(String(mm.meta.credits).replace(/[^0-9.]/g, '')) : 0;
-  let eqCard = '';
-  if (mm && rate > 0) {
-    const times = Math.round(totalRemain / rate / 1000);   // 估算:每次对话约 1K tokens
-    eqCard = `<div class="stat"><div class="v">≈ ${fmt(times)} 次</div><div class="k">${mm.name}(${rate}x · 按 1K tokens/次)</div></div>`;
-  }
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="v">${accs.length}</div><div class="k">账号总数</div></div>
     <div class="stat"><div class="v">${fmt(totalRemain)}</div><div class="k">总剩余 credits</div></div>
-    <div class="stat"><div class="v">${checked}/${accs.length}</div><div class="k">今日已签到</div></div>${eqCard}`;
+    <div class="stat"><div class="v">${checked}/${accs.length}</div><div class="k">今日已签到</div></div>`;
   document.getElementById('cards').innerHTML = accs.map(a => {
     const c = a.credits || {};
     const exp = a.token_expires_at ? new Date(a.token_expires_at).toLocaleString('zh-CN') : '?';
@@ -905,47 +887,79 @@ async function loadModels() {
     ps.running ? `⏳ 可用性检测中 ${ps.done}/${ps.total} · ${ps.current || ''}` : '';
   document.getElementById('probe-all-btn').disabled = !!ps.running;
   if (editingName) return;   // 编辑展开期间冻结列表,避免输入丢失
-  const rows = (d.models || []).map(m => {
+  // 展示过滤:auto、无倍率(官方未上架计费)、探测失败(❌=不能用)的模型一律不显示;
+  // 禁用模型保留以便恢复
+  const visible = (d.models || []).filter(m =>
+    m.disabled || (m.name !== 'auto' && m.meta?.credits && !(m.probe && !m.probe.ok)));
+  const vendorOf = n => {
+    n = n.toLowerCase();
+    if (n.startsWith('deepseek')) return 'DeepSeek';
+    if (n.startsWith('glm') || n.startsWith('glm5v')) return '智谱 GLM';
+    if (n.startsWith('kimi')) return 'Kimi';
+    if (n.startsWith('hy') || n.startsWith('hunyuan')) return '混元';
+    if (n.startsWith('minimax')) return 'MiniMax';
+    return '其他';
+  };
+  const VENDOR_META = {
+    'DeepSeek': {color:'#4D6BFE', abbr:'D'},
+    '智谱 GLM': {color:'#3859FF', abbr:'Z'},
+    'Kimi': {color:'#1f2937', abbr:'K'},
+    '混元': {color:'#0052D9', abbr:'混'},
+    'MiniMax': {color:'#ef4444', abbr:'M'},
+    '其他': {color:'#6b7280', abbr:'·'},
+  };
+  const ORDER = ['DeepSeek', '智谱 GLM', 'Kimi', '混元', 'MiniMax', '其他'];
+  const groups = {};
+  for (const m of visible) { const v = vendorOf(m.name); (groups[v] = groups[v] || []).push(m); }
+  const rowHtml = m => {
     const p = m.probe;
-    let ps_badge = '';
-    if (p) ps_badge = p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>'
-                           : `<span class="ps" title="${esc(p.error)}">❌</span>`;
+    const ps_badge = p && p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>' : '';
     const op = m.disabled
       ? `<button class="mini" onclick="toggleModel('${esc(m.name)}')">恢复</button>`
       : `<button class="mini" onclick="toggleEdit('${esc(m.name)}')">编辑</button>
          <button class="mini" onclick="probeOne('${esc(m.name)}', this)">测</button>
-         <button class="mini warn" onclick="toggleModel('${esc(m.name)}')">${m.source === '自定义' ? '删' : '禁'}</button>`;
-    const src = m.source ? `<span class="badge src">${m.source}</span>` : '';
+         <button class="mini warn" onclick="toggleModel('${esc(m.name)}')">禁</button>`;
+    const src = m.source && m.source !== '上游' ? `<span class="badge src">${m.source}</span>` : '';
     const meta = m.meta || {};
     const tags = (meta.tags || []).map(t => {
       const parts = String(t).split(':');          // badge:标签:颜色
       const lab = parts[1] || '', col = parts[2] || '#d97706';
       return `<span class="mtag" style="color:${esc(col)}; border-color:${esc(col)}55;">${esc(lab)}</span>`;
     }).join('');
-    const rate = meta.credits ? `<span class="tag rate">${esc(meta.credits).replace(' credits', '')}</span>` : '';
+    const rateNum = meta.credits ? parseFloat(String(meta.credits).replace(/[^0-9.]/g, '')) : null;
+    const rateCls = rateNum === null ? '' : rateNum <= 0.1 ? 'rate-lo' : rateNum <= 0.6 ? 'rate-mid' : 'rate-hi';
+    const rate = rateNum !== null
+      ? `<div class="mrate ${rateCls}">${rateNum}x<small>倍率</small></div>` : '';
     const desc = meta.description ? ` title="${esc(m.name)} · ${esc(meta.description)}${meta.credits ? ' · ' + esc(meta.credits) : ''}"` : '';
+    const inp = (m.specs?.input || []).map(x => IN_LAB[x] || x).join(' / ');
+    const out = (m.specs?.output || []).map(x => IN_LAB[x] || x).join(' / ');
     let row = `<div class="mrow${m.disabled ? ' off' : ''}" id="mrow-${esc(m.name)}">
-      <div class="mname"><span class="t"${desc}>${m.name}</span>${src}${tags}${ps_badge}</div>
-      <div>${specSummary(m.specs)}${rate}</div>
-      <div class="ops">${op}</div></div>`;
+      <div class="mmain">
+        <div class="mtitle"><span class="t"${desc}>${m.name}</span>${src}${tags}${ps_badge}</div>
+        <div class="mspec">${fmtK(m.specs?.context_length)} 上下文 · ${fmtK(m.specs?.max_output_tokens)} 最大输出 · 输入 ${inp || '—'} · 输出 ${out || '—'}</div>
+      </div>
+      ${rate}
+      <div class="ops">${op}</div>
+    </div>`;
     if (editingName === m.name && !m.disabled) row += editFormHtml(m.name, m.specs || {});
     return row;
+  };
+  const grouped = ORDER.filter(v => groups[v] && groups[v].length).map(v => {
+    const vm = VENDOR_META[v] || VENDOR_META['其他'];
+    const ms = groups[v];
+    return `<div class="vcard">
+      <div class="vhead">
+        <span class="vd" style="background:${vm.color}">${vm.abbr}</span>
+        <span class="vname">${v}</span>
+        <span class="vg-n">${ms.length} 个模型</span>
+      </div>
+      <div class="vbody">${ms.map(rowHtml).join('')}</div>
+    </div>`;
   }).join('');
-  document.getElementById('model-list').innerHTML =
-    rows || '<div class="empty">模型列表为空</div>';
+  document.getElementById('model-list')
+.innerHTML =
+    grouped || '<div class="empty">所有模型均不可用或已被过滤</div>';
   window.latestModels = d.models || [];
-  const rsel = document.getElementById('rate-model');
-  if (rsel) {
-    const cur = rsel.value || localStorage.getItem('wb-rate-model') || '';
-    const opts = (d.models || []).filter(x => !x.disabled)
-      .map(x => `<option value="${esc(x.name)}">${esc(x.name)}${x.meta?.credits ? ' · ' + esc(x.meta.credits).replace(' credits', '') : ''}</option>`).join('');
-    if (rsel.innerHTML !== opts) {
-      rsel.innerHTML = opts;
-      if (cur) rsel.value = cur;
-      localStorage.setItem('wb-rate-model', rsel.value);
-    }
-  }
-  render();        // 倍率下拉就绪后刷新等效用量卡
   renderApi();
   if (ps.running) setTimeout(loadModels, 2000);   // 探测进行中:2s 轮询进度
 }
@@ -1016,22 +1030,6 @@ async function probeOne(name, btn) {
 }
 async function probeAll() {
   try { await fetch('/v1/models/probe-all', {method:'POST'}); } catch(e) { alert(e.message); }
-  loadModels();
-}
-async function addCustom() {
-  const name = document.getElementById('new-model').value.trim();
-  const alias = document.getElementById('new-alias').value.trim();
-  if (!name) return alert('请输入模型 ID');
-  const body = {name, alias, specs: {
-    context_length: parseInt(document.getElementById('new-ctx').value) || 131072,
-    max_output_tokens: parseInt(document.getElementById('new-out').value) || 8192,
-    input: ['text'], output: ['text'],
-  }};
-  const r = await fetch('/v1/models/custom', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if (!r.ok) return alert((await r.json()).error?.message || '添加失败');
-  document.getElementById('new-model').value = '';
-  document.getElementById('new-alias').value = '';
   loadModels();
 }
 async function toggleModel(name) {
