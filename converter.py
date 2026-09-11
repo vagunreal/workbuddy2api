@@ -397,15 +397,31 @@ PANEL_HTML = """<!doctype html>
   .meta code { background:#f3f4f6; padding:1px 6px; border-radius:4px; }
   .checkin { font-size:13px; margin-bottom:14px; }
   .checkin .ok { color:#16a34a; } .checkin .no { color:var(--red); }
-  .pkg { margin-bottom:12px; }
-  .pkg .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; gap:8px; }
-  .pkg .name { font-weight:500; }
-  .pkg .nums { color:var(--muted); white-space:nowrap; }
-  .pkg .nums b { color:var(--text); }
-  .bar { height:8px; background:#e5e7eb; border-radius:99px; overflow:hidden; }
-  .bar i { display:block; height:100%; border-radius:99px; background:var(--green); transition:width .4s; }
-  .bar i.mid { background:var(--orange); } .bar i.low { background:var(--red); }
-  .cycle { font-size:11px; color:var(--muted); margin-top:4px; }
+  /* 资源包列表：整体一个卡片，固定露出 4 行，内部滚动，先结束的排前面 */
+  .pkg-list { border:1px solid var(--line); border-radius:12px; background:#fafbfc;
+              max-height:236px; overflow-y:auto; padding:5px 6px; }
+  .pkg-list::-webkit-scrollbar { width:6px; }
+  .pkg-list::-webkit-scrollbar-track { background:transparent; }
+  .pkg-list::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
+  .pkg-list::-webkit-scrollbar-thumb:hover { background:#9ca3af; }
+  .pkg { display:grid; grid-template-columns:minmax(200px,1.1fr) minmax(140px,1.6fr) auto;
+         gap:14px; align-items:center; height:56px; padding:6px 12px; border-radius:9px; }
+  .pkg + .pkg { border-top:1px solid #eef0f2; }
+  .pkg:hover { background:#f1f3f5; }
+  .pkg .name { font-size:13px; font-weight:500; min-width:0; }
+  .pkg .name .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pkg .name .d { font-size:11px; color:var(--muted); font-weight:400; margin-top:2px; }
+  .pkg .name .d.soon { color:var(--orange); font-weight:600; }
+  .pkg .mid { display:flex; align-items:center; gap:10px; min-width:0; }
+  .pkg .bar { flex:1; height:7px; background:#e5e7eb; border-radius:99px; overflow:hidden; }
+  .pkg .bar i { display:block; height:100%; border-radius:99px; background:var(--green); transition:width .4s; }
+  .pkg .bar i.mid { background:var(--orange); } .pkg .bar i.low { background:var(--red); }
+  .pkg .pct { font-size:11px; color:var(--muted); width:34px; text-align:right;
+              font-variant-numeric:tabular-nums; }
+  .pkg .nums { font-size:13px; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .pkg .nums b { font-size:15px; }
+  .pkg .nums .u { color:var(--muted); font-size:11px; }
+  .pkg .nums.low b { color:var(--red); }
   .err { color:var(--red); font-size:13px; }
   .toolbar { display:flex; justify-content:flex-end; margin-bottom:16px; align-items:center; gap:12px; }
   button { background:#111827; color:#fff; border:0; border-radius:10px; padding:10px 18px;
@@ -431,9 +447,8 @@ PANEL_HTML = """<!doctype html>
 </div>
 <script>
 const fmt = n => (n ?? 0).toLocaleString('en-US');
-function barHtml(pct) {
-  const cls = pct <= 20 ? 'low' : pct <= 50 ? 'mid' : '';
-  return `<div class="bar"><i class="${cls}" style="width:${Math.max(pct,2)}%"></i></div>`;
+function barHtml(pct, cls) {
+  return `<div class="bar"><i class="${cls || ''}" style="width:${Math.max(pct,2)}%"></i></div>`;
 }
 function badge(a) {
   if (a.cooldown_remaining > 0) return `<span class="badge cool">冷却 ${Math.ceil(a.cooldown_remaining/60)} 分钟</span>`;
@@ -455,15 +470,27 @@ function render(d) {
     const c = a.credits || {};
     const exp = a.token_expires_at ? new Date(a.token_expires_at).toLocaleString('zh-CN') : '?';
     const ck = a.checkin || {};
+    const now = Date.now();
+    const DAY = 86400000;
+    // 后端已按 cycle_end 升序（先结束的在前），这里只做渲染
     const pkgs = (c.packages || []).map(p => {
       const pct = p.size ? Math.round(p.remain * 100 / p.size) : 0;
+      const barCls = pct <= 20 ? 'low' : pct <= 50 ? 'mid' : '';
+      const endTs = p.cycle_end ? new Date(p.cycle_end.replace(' ', 'T')).getTime() : 0;
+      const daysLeft = endTs ? Math.ceil((endTs - now) / DAY) : null;
+      const soon = daysLeft !== null && daysLeft <= 7;
+      const dTxt = daysLeft === null ? '—' :
+        daysLeft < 0 ? '已过期' : daysLeft === 0 ? '今天到期' :
+        daysLeft === 1 ? '明天到期' : `${daysLeft} 天后到期`;
       return `<div class="pkg">
-        <div class="row"><span class="name">${p.name}</span>
-        <span class="nums"><b>${fmt(p.remain)}</b> / ${fmt(p.size)} ${p.unit}</span></div>
-        ${barHtml(pct)}
-        <div class="cycle">周期截止 ${p.cycle_end || '—'}</div>
+        <div class="name"><div class="t" title="${p.name}">${p.name}</div>
+          <div class="d${soon ? ' soon' : ''}">${dTxt} · ${p.cycle_end || ''}</div></div>
+        <div class="mid">${barHtml(pct, barCls)}<span class="pct">${pct}%</span></div>
+        <div class="nums${pct <= 20 ? ' low' : ''}"><b>${fmt(p.remain)}</b> <span class="u">/ ${fmt(p.size)} ${p.unit}</span></div>
       </div>`;
     }).join('');
+    const list = c.error ? `<div class="err">额度查询失败: ${c.error}</div>`
+      : c.packages?.length ? `<div class="pkg-list">${pkgs}</div>` : '<div class="empty">无活跃资源包</div>';
     return `<div class="card">
       <div class="head"><span class="badge">WORKBUDDY</span>${badge(a)}
         <span class="nick">${a.nickname || '未知账号'}</span>
@@ -475,7 +502,7 @@ function render(d) {
         ${ck.today ? (ck.ok ? `<span class="ok">✅ ${ck.msg || '已签到'}${ck.time ? ' ('+ck.time+')' : ''}</span>`
                             : `<span class="no">❌ ${ck.msg || '失败'}</span>`)
                   : '<span class="no">未记录(服务重启后首次签到前)</span>'}</div>
-      ${c.error ? `<div class="err">额度查询失败: ${c.error}</div>` : pkgs}
+      ${list}
     </div>`;
   }).join('');
 }
@@ -676,7 +703,8 @@ def _fetch_credits(cred: CredentialManager) -> dict:
                 "unit": a.get("CapacityUnit") or "credits",
                 "cycle_end": a.get("CycleEndTime", ""),
             })
-        packages.sort(key=lambda p: p["remain"], reverse=True)
+        # 按周期截止时间升序：即将结束的资源包排在前面
+        packages.sort(key=lambda p: p["cycle_end"] or "9999-12-31")
         result = {"total_remain": sum(p["remain"] for p in packages),
                   "total_size": sum(p["size"] for p in packages),
                   "packages": packages, "error": None}
