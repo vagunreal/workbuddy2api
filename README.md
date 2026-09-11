@@ -231,7 +231,7 @@ docker compose up -d
 ## 签到脚本单独使用
 
 ```bash
-.venv/bin/python checkin.py
+.venv/bin/python scripts/checkin.py
 ```
 
 自动遍历凭据目录中所有账号：token 临近过期先刷新 → 调用每日签到接口 → 结果打印并写入 `checkin_state.json`（按 uid 去重，同账号多份凭据只签一次）。
@@ -242,14 +242,14 @@ docker compose up -d
 
 ```bash
 # 账号池端到端测试（内置本地 mock 后端，34 项断言，不依赖真实账号）
-.venv/bin/python test_account_pool.py
+.venv/bin/python tests/test_account_pool.py
 
 # 协议适配器测试
-.venv/bin/python test_anthropic_adapter.py
-.venv/bin/python test_responses_adapter.py
+.venv/bin/python tests/test_anthropic_adapter.py
+.venv/bin/python tests/test_responses_adapter.py
 ```
 
-`test_account_pool.py` 覆盖：uid 去重、粘性/冷却/切换顺序、failover 状态码与文本判定、非流式与流式端到端切换、全部账号失败时的错误透传、面板数据接口。
+`tests/test_account_pool.py` 覆盖：uid 去重、粘性/冷却/切换顺序、failover 状态码与文本判定、非流式与流式端到端切换、全部账号失败时的错误透传、面板数据接口。
 
 ---
 
