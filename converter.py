@@ -581,12 +581,14 @@ def _probe_all_worker():
 
 
 def _api_info() -> dict:
-    key = CONFIG.get("api_key") or ""
     host = CONFIG.get("host") or "127.0.0.1"
+    keys = [k for k in _load_keys() if not k.get("disabled")]
+    master = CONFIG.get("api_key") or ""
     return {
         "base_url": f"http://{host}:{CONFIG.get('port', 8787)}/v1",
-        "api_key": key,
-        "auth_enabled": bool(key),
+        "api_key": master or (keys[0]["key"] if keys else ""),
+        "auth_enabled": bool(master) or bool(keys),
+        "keys_count": len(keys),
     }
 
 
@@ -702,6 +704,14 @@ PANEL_HTML = """<!doctype html>
   .mtag { border:1px solid; border-radius:5px; padding:1px 6px; font-size:10px; font-weight:600; }
   .ps { font-size:11px; }
   .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
+  /* API Keys 列表 */
+  .krow { display:flex; align-items:center; gap:12px; padding:9px 6px; }
+  .krow + .krow { border-top:1px solid #f3f4f6; }
+  .krow .kname { font-size:13px; font-weight:600; width:130px; flex-shrink:0;
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .krow code { flex:1; background:#f3f4f6; padding:5px 10px; border-radius:6px;
+               font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .krow .ku { font-size:11px; color:var(--muted); width:110px; flex-shrink:0; }
   /* 编辑展开 */
   .fe { display:flex; flex-direction:column; gap:4px; }
   .fe > span { font-size:11px; color:var(--muted); }
@@ -756,9 +766,20 @@ PANEL_HTML = """<!doctype html>
   <div class="card">
     <div class="kv"><span>Base URL</span><code id="api-url">—</code>
       <button class="mini" onclick="copyTxt('api-url')">复制</button></div>
-    <div class="kv"><span>API Key</span><code id="api-key">—</code>
+    <div class="kv"><span>当前 Key</span><code id="api-key">—</code>
       <button class="mini" onclick="copyTxt('api-key')">复制</button>
       <span class="note" id="api-note"></span></div>
+  </div>
+  <div class="card">
+    <div class="kv" style="margin-bottom:12px;"><span style="width:auto; font-size:14px; font-weight:700; color:var(--text);">API Keys</span>
+      <span class="note">创建的 Key 立即生效,可同时存在多个;删除立即失效</span></div>
+    <div class="add-form" style="margin-bottom:10px;">
+      <div class="fe"><span>用途备注</span><input id="key-name" placeholder="如:我的电脑 / 手机" style="width:190px;"></div>
+      <button class="mini2" onclick="createKey()" style="align-self:flex-end;">+ 生成新 Key</button>
+      <span class="note" style="align-self:flex-end;" id="master-note"></span>
+    </div>
+    <div id="keys-list"><div class="empty">加载中…</div></div>
+  </div>
     <div class="kv"><span>接口前缀</span>
       <label class="chip"><input type="radio" name="pv" value="v1" onchange="renderApi()" checked> /v1(标准)</label>
       <label class="chip"><input type="radio" name="pv" value="v2" onchange="renderApi()"> /v2(别名,同一服务)</label></div>
@@ -969,7 +990,7 @@ function showPage(p) {
     document.getElementById('page-' + id).style.display = (id === p ? '' : 'none');
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('act', t.dataset.p === p));
   localStorage.setItem('wb-page', p);
-  if (p === 'api') renderApi();
+  if (p === 'api') { renderApi(); loadKeys(); }
 }
 function renderApi() {
   const pv = (document.querySelector('input[name="pv"]:checked') || {value: 'v1'}).value;
@@ -1046,6 +1067,46 @@ async function toggleModel(name) {
 }
 function copyTxt(id) {
   navigator.clipboard.writeText(document.getElementById(id).textContent.trim());
+}
+/* ---- API Keys 管理 ---- */
+async function loadKeys() {
+  let d;
+  try { d = await (await fetch('/v1/keys')).json(); }
+  catch(e) { return; }
+  const fmtT = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '从未';
+  const rows = (d.keys || []).map(k => `<div class="krow">
+    <div class="kname" title="${esc(k.name)}">${esc(k.name)}</div>
+    <code title="点击复制" style="cursor:pointer;" onclick="copyKey('${esc(k.key)}')">${esc(k.key)}</code>
+    <div class="ku">最近使用: ${fmtT(k.last_used)}</div>
+    <button class="mini warn" onclick="delKey('${esc(k.key)}')">删除</button>
+  </div>`).join('');
+  document.getElementById('keys-list').innerHTML =
+    rows || '<div class="empty" style="padding:18px;">还没有创建 Key — 当前所有客户端均可免鉴权调用</div>';
+  document.getElementById('master-note').textContent =
+    d.master_set ? '启动参数主密钥同时有效' : '';
+}
+function copyKey(k) { navigator.clipboard.writeText(k); }
+async function createKey() {
+  const name = document.getElementById('key-name').value.trim() || '未命名';
+  try {
+    const r = await fetch('/v1/keys', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    document.getElementById('key-name').value = '';
+    await loadKeys(); await loadModels();
+    alert('Key 已创建(已自动复制):' + String.fromCharCode(10, 10) + d.key);
+    navigator.clipboard.writeText(d.key);
+  } catch(e) { alert('创建失败: ' + e.message); }
+}
+async function delKey(key) {
+  if (!confirm('删除后该 Key 立即失效,确定删除?')) return;
+  try {
+    const r = await fetch('/v1/keys/delete', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({key})});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch(e) { alert('删除失败: ' + e.message); }
+  loadKeys(); loadModels();
 }
 load();
 loadModels();
@@ -1128,17 +1189,61 @@ def _truncate(s: str, n: int = 80) -> str:
     return s[:n] + ("…" if len(s) > n else "")
 
 
+# ---- 动态 API Key 管理(面板创建/删除,立即生效) ----
+KEYS_FILE = Path(__file__).parent / "api_keys.json"
+_keys_cache: dict = {"mtime": 0.0, "keys": []}
+_keys_last_used: dict = {}   # key -> 最后使用时间(内存,随增删持久化)
+
+
+def _load_keys() -> list[dict]:
+    """读取动态 key 列表(mtime 缓存,避免每请求解析 JSON)。"""
+    try:
+        mt = KEYS_FILE.stat().st_mtime
+    except OSError:
+        return []
+    if _keys_cache["mtime"] != mt:
+        try:
+            _keys_cache["keys"] = json.loads(KEYS_FILE.read_text(encoding="utf-8")).get("keys") or []
+            _keys_cache["mtime"] = mt
+        except Exception:
+            pass
+    return _keys_cache["keys"]
+
+
+def _save_keys(keys: list[dict]):
+    for k in keys:
+        k["last_used"] = _keys_last_used.get(k["key"])
+    tmp = KEYS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"keys": keys}, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, KEYS_FILE)
+    _keys_cache["keys"] = keys
+    _keys_cache["mtime"] = KEYS_FILE.stat().st_mtime
+
+
 def _check_auth(authorization: Optional[str], x_api_key: Optional[str]):
-    key = CONFIG["api_key"]
-    if not key:
-        return
+    """鉴权:启动参数主密钥 或 面板创建的任一动态 key。
+
+    主密钥未设置且不存在动态 key 时不鉴权(本机自用模式)。
+    """
     token = ""
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:].strip()
     if not token and x_api_key:
         token = x_api_key
-    if token != key:
-        raise HTTPException(status_code=401, detail={"error": {"message": "invalid api key", "type": "auth_error"}})
+    master = CONFIG.get("api_key") or ""
+    keys = _load_keys()
+    # 鉴权开关:设置了主密钥,或创建过 Key(api_keys.json 存在)即启用;全删后所有请求 401
+    auth_on = bool(master) or KEYS_FILE.exists()
+    if not auth_on:
+        return
+    if master and token == master:
+        return
+    for k in keys:
+        if not k.get("disabled") and k.get("key") == token:
+            if token:
+                _keys_last_used[token] = int(time.time())
+            return
+    raise HTTPException(status_code=401, detail={"error": {"message": "invalid api key", "type": "auth_error"}})
 
 
 def _pool() -> CredentialPool:
@@ -1404,6 +1509,57 @@ async def models_specs(request: Request):
     reg.setdefault("specs", {})[name] = merged
     _save_registry(reg)
     return {"ok": True, "name": name, "specs": merged}
+
+
+# ---------------------------------------------------------------------------
+# API Key 管理(面板创建/删除,立即生效)
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/keys")
+def keys_list():
+    keys = _load_keys()
+    for k in keys:
+        k["last_used"] = _keys_last_used.get(k["key"]) or k.get("last_used")
+    master = CONFIG.get("api_key") or ""
+    return {"keys": keys, "master_set": bool(master),
+            "auth_enabled": bool(master) or bool(keys)}
+
+
+@app.post("/v1/keys")
+async def keys_create(request: Request):
+    """创建新 API Key。请求体: {"name": "用途备注"}。返回完整 key(仅此一次展示原文)。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    name = ((payload or {}).get("name") or "").strip() or "未命名"
+    import secrets as _secrets
+    key = "sk-wb-" + _secrets.token_hex(16)
+    keys = _load_keys()
+    while any(k["key"] == key for k in keys):   # 极小概率碰撞
+        key = "sk-wb-" + _secrets.token_hex(16)
+    keys.append({"key": key, "name": name, "created_at": int(time.time()),
+                 "last_used": None, "disabled": False})
+    _save_keys(keys)
+    _log(f"+ 创建 API Key: {name} ({key[:12]}…)")
+    return {"ok": True, "key": key, "name": name}
+
+
+@app.post("/v1/keys/delete")
+async def keys_delete(request: Request):
+    """删除 API Key。请求体: {"key": "sk-wb-..."}。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": {"message": "bad json", "type": "invalid_request_error"}})
+    key = ((payload or {}).get("key") or "").strip()
+    keys = _load_keys()
+    new_keys = [k for k in keys if k["key"] != key]
+    if len(new_keys) == len(keys):
+        raise HTTPException(status_code=404, detail={"error": {"message": "key 不存在", "type": "not_found"}})
+    _save_keys(new_keys)
+    _log(f"- 删除 API Key: {key[:12]}…")
+    return {"ok": True, "keys": new_keys}
 
 
 @app.get("/v1/models-refresh")

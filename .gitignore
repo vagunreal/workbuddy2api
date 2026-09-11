@@ -29,3 +29,4 @@ checkin_state.json
 # 模型注册表(运行时配置/探测缓存)
 models_registry.json
 models_registry.json
+api_keys.json
