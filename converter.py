@@ -698,8 +698,6 @@ PANEL_HTML = """<!doctype html>
   .tab { background:#fff; color:#374151; border:1px solid var(--line); border-radius:10px;
          padding:9px 20px; font-size:14px; cursor:pointer; font-weight:500; }
   .tab.act { background:#111827; color:#fff; border-color:#111827; }
-  .ver { font-size:11px; background:#eef2ff; color:#4338ca; border-radius:6px;
-         padding:2px 8px; vertical-align:middle; margin-left:6px; font-weight:700; }
   .toolbar select { border:1px solid var(--line); border-radius:8px; padding:7px 9px;
                     font-size:13px; background:#fff; }
   pre.curl { background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px;
@@ -728,7 +726,7 @@ PANEL_HTML = """<!doctype html>
 </head>
 <body>
 <div class="wrap">
-  <h1>WorkBuddy 控制台<span class="ver">v2</span></h1>
+  <h1>WorkBuddy 控制台</h1>
   <div class="sub">多账号额度聚合 · 数据来自腾讯 CodeBuddy 后端 · <b id="refreshed"></b></div>
   <div class="tabs">
     <button class="tab act" data-p="home" onclick="showPage('home')">🖥️ 主页面</button>
@@ -970,8 +968,7 @@ GET  ${p}/models                    (可用模型列表)`
     + (pv === 'v1' ? `
 POST ${p}/responses                (OpenAI Responses · Codex CLI)
 POST ${p}/messages                 (Anthropic Messages · Claude Code)
-GET  http://127.0.0.1:8787/panel   (本控制台)` : '
-(v2 为别名路由,chat/completions 与 models 与 v1 完全等价)');
+GET  http://127.0.0.1:8787/panel   (本控制台)` : ' (v2 为别名路由,chat/completions 与 models 与 v1 完全等价)');
   document.getElementById('api-eps').textContent = eps;
   const model = (window.latestModels || []).find(x => !x.disabled);
   const modelName = model ? model.name : 'glm-5.2';
