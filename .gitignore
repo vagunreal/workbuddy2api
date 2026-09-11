@@ -22,3 +22,6 @@ Thumbs.db
 *.key
 secrets.*
 
+
+# 运行时状态(含账号 uid/昵称,不入库)
+checkin_state.json
