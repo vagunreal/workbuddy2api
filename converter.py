@@ -704,7 +704,14 @@ PANEL_HTML = """<!doctype html>
   .badge.src { background:#f0fdf4; color:#15803d; font-size:10px; padding:2px 7px; }
   .mtag { border:1px solid; border-radius:5px; padding:1px 6px; font-size:10px; font-weight:600; }
   .ps { font-size:11px; }
-  .ops { display:flex; gap:6px; justify-content:flex-end; flex-shrink:0; }
+  .mparams { display:flex; gap:10px; align-items:center; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end; }
+  .pv { text-align:center; background:#f8fafc; border:1px solid #eef0f2; border-radius:10px;
+        padding:8px 16px; min-width:78px; }
+  .pv b { display:block; font-size:15px; font-weight:700; color:var(--text); }
+  .pv span { font-size:10.5px; color:var(--muted); }
+  .pv.rate-lo { background:#f0fdf4; border-color:#bbf7d0; } .pv.rate-lo b { color:#15803d; }
+  .pv.rate-mid { background:#fffbeb; border-color:#fde68a; } .pv.rate-mid b { color:#b45309; }
+  .pv.rate-hi { background:#fef2f2; border-color:#fecaca; } .pv.rate-hi b { color:#b91c1c; }
   /* ---- 页签导航 ---- */
   .tabs { display:flex; gap:4px; margin-bottom:0; border-bottom:2px solid var(--line); }
   .tab { background:transparent; color:var(--muted); border:0; border-radius:10px 10px 0 0;
@@ -908,7 +915,6 @@ async function switchTo(uid, btn) {
 
 /* ---- 模型管理 ---- */
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-let editingName = null;   // 当前展开参数编辑的模型名(编辑期间冻结列表刷新)
 const fmtK = n => !n ? '—' : n >= 1048576 ? (n/1048576).toFixed(n%1048576 ? 1 : 0) + 'M' : Math.round(n/1024) + 'K';
 const IN_LAB = {text:'文本', image:'图片', video:'视频', pdf:'PDF'};
 function specSummary(s) {
@@ -916,19 +922,6 @@ function specSummary(s) {
   const inp = (s.input || []).map(x => IN_LAB[x] || x).join('/');
   const out = (s.output || []).map(x => IN_LAB[x] || x).join('/');
   return `<span class="spec"><span><b>${fmtK(s.context_length)}</b> 上下文</span>·<span><b>${fmtK(s.max_output_tokens)}</b> 最大输出</span>·<span>输入 <span class="tag">${inp || '—'}</span></span>·<span>输出 <span class="tag">${out || '—'}</span></span></span>`;
-}
-function editFormHtml(name, s) {
-  const chk = (g, v, lab) =>
-    `<label class="chip"><input type="checkbox" data-g="${g}" value="${v}" ${s[g]?.includes(v) ? 'checked' : ''}> ${lab}</label>`;
-  return `<div class="mrow-edit">
-    <div class="fe"><span>上下文窗口</span><input id="e-ctx" type="number" value="${s.context_length}"></div>
-    <div class="fe"><span>最大输出 Token</span><input id="e-out" type="number" value="${s.max_output_tokens}"></div>
-    <div class="fe"><span>输入类型</span><div style="display:flex; gap:6px;">${['text:文本','image:图片','video:视频','pdf:PDF'].map(x => { const [v,l] = x.split(':'); return chk('input', v, l); }).join('')}</div></div>
-    <div class="fe"><span>输出类型</span><div style="display:flex; gap:6px;">${chk('output','text','文本')}</div></div>
-    <div class="fe"><span>&nbsp;</span><div style="display:flex; gap:8px;">
-      <button class="mini2" onclick="saveSpecs('${esc(name)}')">保存参数</button>
-      <button class="mini" onclick="toggleEdit('${esc(name)}')">取消</button></div></div>
-  </div>`;
 }
 async function loadModels() {
   let d;
@@ -939,11 +932,10 @@ async function loadModels() {
   const k = document.getElementById('api-key');
   k.textContent = api.auth_enabled ? api.api_key : '(未启用鉴权,客户端留空即可)';
   document.getElementById('api-note').textContent = api.auth_enabled ? '' : '如需启用鉴权,启动时加 --api-key your-secret';
-  if (editingName) return;   // 编辑展开期间冻结列表,避免输入丢失
   // 展示过滤:auto、无倍率(官方未上架计费)、探测失败(❌=不能用)的模型一律不显示;
   // 禁用模型保留以便恢复
   const visible = (d.models || []).filter(m =>
-    m.disabled || (m.name !== 'auto' && m.meta?.credits && !(m.probe && !m.probe.ok)));
+    m.name !== 'auto' && m.meta?.credits);
   const vendorOf = n => {
     n = n.toLowerCase();
     if (n.startsWith('deepseek')) return 'DeepSeek';
@@ -969,37 +961,30 @@ async function loadModels() {
   ORDER.sort((a, b) => (groups[a] && groups[b] ? rateNumOf(groups[a][0]) - rateNumOf(groups[b][0])
                         : groups[a] ? -1 : groups[b] ? 1 : 0));
   const rowHtml = m => {
-    const p = m.probe;
-    const ps_badge = p && p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>' : '';
-    const op = m.disabled
-      ? `<button class="mini" onclick="toggleModel('${esc(m.name)}')">恢复显示</button>`
-      : `<button class="mini" title="编辑该模型的参数规格(上下文/最大输出/输入输出类型)" onclick="toggleEdit('${esc(m.name)}')">参数</button>
-         <button class="mini" title="发一条极小测试消息,验证该模型当前是否可用" onclick="probeOne('${esc(m.name)}', this)">测可用</button>
-         <button class="mini warn" title="从客户端模型列表中隐藏(可随时恢复)" onclick="toggleModel('${esc(m.name)}')">隐藏</button>`;
-    const src = m.source && m.source !== '上游' ? `<span class="badge src">${m.source}</span>` : '';
     const meta = m.meta || {};
     const tags = (meta.tags || []).map(t => {
-      const parts = String(t).split(':');          // badge:标签:颜色
+      const parts = String(t).split(':');
       const lab = parts[1] || '', col = parts[2] || '#d97706';
       return `<span class="mtag" style="color:${esc(col)}; border-color:${esc(col)}55;">${esc(lab)}</span>`;
     }).join('');
+    const srcb = m.source && m.source !== '上游' ? `<span class="badge src">${m.source}</span>` : '';
     const rateNum = meta.credits ? parseFloat(String(meta.credits).replace(/[^0-9.]/g, '')) : null;
     const rateCls = rateNum === null ? '' : rateNum <= 0.1 ? 'rate-lo' : rateNum <= 0.6 ? 'rate-mid' : 'rate-hi';
-    const rate = rateNum !== null
-      ? `<div class="mrate ${rateCls}">${rateNum}x<small>倍率</small></div>` : '';
     const desc = meta.description ? ` title="${esc(m.name)} · ${esc(meta.description)}${meta.credits ? ' · ' + esc(meta.credits) : ''}"` : '';
-    const inp = (m.specs?.input || []).map(x => IN_LAB[x] || x).join(' / ');
-    const out = (m.specs?.output || []).map(x => IN_LAB[x] || x).join(' / ');
-    let row = `<div class="mrow${m.disabled ? ' off' : ''}" id="mrow-${esc(m.name)}">
+    const inp = (m.specs?.input || []).map(x => IN_LAB[x] || x).join('/');
+    const out = (m.specs?.output || []).map(x => IN_LAB[x] || x).join('/');
+    return `<div class="mrow" id="mrow-${esc(m.name)}">
       <div class="mmain">
-        <div class="mtitle"><span class="t"${desc}>${m.name}</span>${src}${tags}${ps_badge}</div>
-        <div class="mspec">${fmtK(m.specs?.context_length)} 上下文 · ${fmtK(m.specs?.max_output_tokens)} 最大输出 · 输入 ${inp || '—'} · 输出 ${out || '—'}</div>
+        <div class="mtitle"><span class="t"${desc}>${m.name}</span>${srcb}${tags}</div>
       </div>
-      ${rate}
-      <div class="ops">${op}</div>
+      <div class="mparams">
+        <div class="pv"><b>${fmtK(m.specs?.context_length)}</b><span>上下文</span></div>
+        <div class="pv"><b>${fmtK(m.specs?.max_output_tokens)}</b><span>最大输出</span></div>
+        <div class="pv"><b>${inp || '—'}</b><span>输入</span></div>
+        <div class="pv"><b>${out || '—'}</b><span>输出</span></div>
+        ${rateNum !== null ? `<div class="pv ${rateCls}"><b>${rateNum}x</b><span>倍率</span></div>` : ''}
+      </div>
     </div>`;
-    if (editingName === m.name && !m.disabled) row += editFormHtml(m.name, m.specs || {});
-    return row;
   };
   const grouped = ORDER.filter(v => groups[v] && groups[v].length).map(v => {
     const vm = VENDOR_META[v] || VENDOR_META['其他'];
@@ -1053,34 +1038,6 @@ function renderApi() {
   const pv = localStorage.getItem('wb-pv');
   if (pv) { const r = document.querySelector(`input[name="pv"][value="${pv}"]`); if (r) r.checked = true; }
 })();
-function toggleEdit(name) {
-  editingName = (editingName === name) ? null : name;
-  loadModels();
-}
-async function saveSpecs(name) {
-  const get = g => [...document.querySelectorAll('#model-list .mrow-edit input[data-g="' + g + '"]:checked')].map(i => i.value);
-  const specs = {
-    context_length: parseInt(document.getElementById('e-ctx').value) || 131072,
-    max_output_tokens: parseInt(document.getElementById('e-out').value) || 8192,
-    input: get('input').length ? get('input') : ['text'],
-    output: get('output').length ? get('output') : ['text'],
-  };
-  try {
-    const r = await fetch('/v1/models/specs', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, specs})});
-    if (!r.ok) throw new Error((await r.json()).error?.message || r.status);
-  } catch(e) { alert('保存失败: ' + e.message); return; }
-  editingName = null;
-  loadModels();
-}
-async function probeOne(name, btn) {
-  btn.disabled = true; btn.textContent = '…';
-  try {
-    await fetch('/v1/models/probe', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({model: name})});
-  } catch(e) { alert('探测失败: ' + e.message); }
-  loadModels();
-}
 async function refreshModels(btn) {
   if (btn) { btn.disabled = true; btn.textContent = '刷新中…'; }
   try {
