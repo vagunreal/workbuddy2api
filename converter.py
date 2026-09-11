@@ -202,11 +202,25 @@ class CredentialManager:
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODELS = [
+    "deepseek-v4.1-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3", "deepseek-r1",
     "glm-5.2", "glm-5.1", "glm-5v-turbo",
     "kimi-k2.7", "kimi-k2.6", "kimi-k2.5",
-    "deepseek-v4-pro", "deepseek-v4-flash",
-    "minimax-m3-pay", "hy3-preview-agent", "auto",
+    "minimax-m3", "minimax-m3-pay",
+    "hy3", "hy3-preview-agent",
+    "auto",
 ]
+
+# 模型别名映射（允许客户端用简短名称或常见别名直接请求）
+MODEL_ALIASES = {
+    "v4.1": "deepseek-v4.1-flash",
+    "v4.1-flash": "deepseek-v4.1-flash",
+    "deepseek-v4.1": "deepseek-v4.1-flash",
+    "v4": "deepseek-v4-pro",
+    "v4-pro": "deepseek-v4-pro",
+    "v4-flash": "deepseek-v4-flash",
+    "r1": "deepseek-r1",
+    "v3": "deepseek-v3",
+}
 
 # 后端请求体里出现过的额外字段（透传时若客户端给了就保留）
 PASSTHROUGH_BODY_KEYS = {
@@ -314,7 +328,8 @@ async def chat_completions(request: Request,
     # 构造后端 body：只透传已知的合法字段
     client_wants_stream = bool(payload.get("stream"))
     body = {k: payload[k] for k in PASSTHROUGH_BODY_KEYS if k in payload}
-    body.setdefault("model", "auto")
+    raw_model = body.get("model", "auto")
+    body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
     # 后端只支持流式：始终以 stream=True 调后端，非流式由转换器聚合
     body["stream"] = True
     if "stream_options" not in body:
@@ -536,11 +551,34 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
                     _log(f"{prefix}── ERROR BODY ──\n{err.decode('utf-8','replace')}")
                     yield _err_event(err, r.status_code)
                     return
+                stream_buf = b""
                 async for chunk in r.aiter_bytes():
                     if chunk:
                         raw_parts.append(chunk)
                         _feed(chunk)
-                        yield chunk
+                        stream_buf += chunk
+                        while b"\n" in stream_buf:
+                            line, stream_buf = stream_buf.split(b"\n", 1)
+                            stripped = line.strip()
+                            if not stripped.startswith(b"data:"):
+                                if stripped:
+                                    yield line + b"\n"
+                                continue
+                            data_bytes = stripped[5:].strip()
+                            if data_bytes == b"[DONE]":
+                                yield b"data: [DONE]\n\n"
+                                continue
+                            try:
+                                obj = json.loads(data_bytes)
+                                for ch in obj.get("choices") or []:
+                                    delta = ch.get("delta") or {}
+                                    for empty_key in ("reasoning_content", "refusal", "function_call", "extra_fields", "tool_calls"):
+                                        if delta.get(empty_key) in ("", None, []):
+                                            delta.pop(empty_key, None)
+                                out_line = f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+                                yield out_line
+                            except Exception:
+                                yield line + b"\n"
     except httpx.HTTPError as e:
         _log(f"{prefix}✗ 网络错误 | {model_name} | {e}")
         yield _err_event(str(e).encode(), 502)
@@ -650,7 +688,8 @@ async def create_response(request: Request,
         raise HTTPException(status_code=400, detail={"error": {"message": f"request conversion error: {e}", "type": "invalid_request_error"}})
 
     chat_body, projection_stats = project_responses_chat_body(chat_body)
-    chat_body.setdefault("model", "auto")
+    raw_model = chat_body.get("model", "auto")
+    chat_body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
     chat_body["stream"] = True
     if "stream_options" not in chat_body:
         chat_body["stream_options"] = {"include_usage": True}
@@ -776,7 +815,8 @@ async def create_message(request: Request,
     except Exception as e:
         raise HTTPException(status_code=400, detail={"error": {"message": f"request conversion error: {e}", "type": "invalid_request_error"}})
 
-    chat_body.setdefault("model", "auto")
+    raw_model = chat_body.get("model", "auto")
+    chat_body["model"] = MODEL_ALIASES.get(raw_model, raw_model)
     chat_body["stream"] = True
     if "stream_options" not in chat_body:
         chat_body["stream_options"] = {"include_usage": True}
