@@ -1,135 +1,83 @@
 # workbuddy2api
 
-把 **WorkBuddy / CodeBuddy（腾讯代码助手）** 的桌面端登录态，转成你本机可直接使用的 **OpenAI / Anthropic 兼容 API**。
+把 **WorkBuddy / CodeBuddy（腾讯代码助手）** 的登录凭据，转成本机可直接使用的 **OpenAI / Anthropic 兼容 API**，并内置：
 
-适用场景：
+- **多账号池**：多个账号聚合为一个服务，额度用尽自动切换下一个
+- **可视化面板**：浏览器查看每个账号的积分额度、签到状态，支持手动切换当前账号
+- **每日自动签到**：启动时自动为账号池内所有账号签到领积分
 
-- 用 **Codex CLI** 走 `/v1/responses`
-- 用 **Claude Code / CC Switch** 走 `/v1/messages`
-- 用 **Cherry Studio / ZCode / LobeChat / NextChat / Open WebUI** 走 `/v1/chat/completions`
+适用客户端：Codex CLI（`/v1/responses`）、Claude Code / CC Switch（`/v1/messages`）、Cherry Studio / ZCode / LobeChat / NextChat / Open WebUI 等（`/v1/chat/completions`）。
 
-[English](#english) · [中文](#中文)
-
----
-
-## 中文
-
-### 这是什么
-
-`workbuddy2api` 是一个本地协议转换器。它会读取你已经登录好的 WorkBuddy / CodeBuddy 桌面端凭据，转发到腾讯后端 `copilot.tencent.com`，然后在本地暴露这些接口：
-
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
-- `POST /v1/messages`
-- `GET /v1/models`
-- `GET /health`
-
-它不负责登录，不模拟桌面端，也不替你执行工具。它只做三件事：
-
-1. 读取本机登录态并注入鉴权头
-2. 在 OpenAI / Anthropic 协议和腾讯后端协议之间转换
-3. 对 `Codex CLI` 这类长上下文 agent 请求做后端友好的压缩投影
-
-> 命名说明：项目对外名称现在叫 `workbuddy2api`。代码里仍保留部分历史命名，比如 `codebuddy2openai`、`CODEBUDDY2OPENAI_*`，目的是兼容旧配置和环境变量。
-> 另外，GitHub 仓库路径当前也可能仍沿用 `codebuddy2openai`，这是仓库路径与项目展示名尚未完全统一，不影响使用。
-
-### 你能用它做什么
-
-- 把 WorkBuddy 订阅复用到 OpenAI 兼容客户端
-- 让 Codex CLI 直接接腾讯后端，而不是只接 OpenAI 官方
-- 让 Claude Code 通过 CC Switch 复用 WorkBuddy 支持的模型
-- 保留原生 `tools` / `tool_calls` / 流式 SSE / 多轮工具调用
-
-### 当前支持
-
-| 客户端 / 协议 | 接口 | 当前状态 |
-|------|------|------|
-| OpenAI Chat Completions | `/v1/chat/completions` | 已支持 |
-| OpenAI Responses | `/v1/responses` | 已支持，适配 Codex CLI |
-| Anthropic Messages | `/v1/messages` | 已支持，适配 Claude Code / CC Switch |
-| OpenAI Models | `/v1/models` | 已支持 |
-| Health Check | `/health` | 已支持 |
+> 来源：基于 [HanHan666666/codebuddy2openai](https://github.com/HanHan666666/codebuddy2openai) 扩展多账号池与面板能力。上游接口（`copilot.tencent.com` / `codebuddy.cn` 的 `/v2/*`）属非公开逆向接口，无稳定性承诺，仅供个人学习研究，请自担风险。
 
 ---
 
-## 3 分钟上手
+## 功能总览
 
-### 1. 前置条件
+| 功能 | 说明 |
+|------|------|
+| 多账号池 | 自动扫描本机所有凭据文件（WSL + Windows 挂载目录），按账号 uid 去重后入池 |
+| 粘性调度 | 正常时一直使用当前账号；某账号失败才切换，成功后粘住 |
+| 故障自动切换 | 遇 HTTP 401/402/403/429 或错误文本含"额度/余额/配额/quota"等关键词时，该账号冷却 30 分钟，自动切到下一个健康账号 |
+| 手动切换 | 面板点击"设为当前使用"，或调用 `POST /v1/account-switch` |
+| 兜底硬试 | 所有账号都在冷却时仍按顺序重试（额度可能已恢复），失败才透传错误 |
+| 可视化面板 | `GET /panel`：账号卡片、积分资源包进度条、签到状态、30s 自动刷新 |
+| 每日签到 | `checkin.py` 遍历所有账号签到领积分，结果写入 `checkin_state.json` 供面板展示 |
+| token 自动刷新 | 每个账号临近过期自动调 `/v2/plugin/auth/token/refresh` 刷新并原子回写凭据文件 |
+| 三协议兼容 | OpenAI Chat / OpenAI Responses / Anthropic Messages，均支持流式与工具调用 |
+| 脱敏 | `--desensitize` 对 system 提示词做零宽字符脱敏 + 压缩，缓解后端内容审核误拦 |
 
-你需要先满足这 3 个条件：
+---
 
-1. 本机已经安装并登录 **WorkBuddy / CodeBuddy** 桌面端
-2. 本机有 **Python 3.8+**
-3. 已安装依赖 `fastapi`、`uvicorn`、`httpx`
+## 快速开始
 
-默认会在这些位置寻找登录态：
-
-- macOS: `~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/*.info`
-- Windows: `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\*.info`
-- Linux: `~/.local/share/CodeBuddyExtension/Data/Public/auth/*.info`
-
-### 2. 安装依赖
-
-推荐用 `uv`：
-
-```bash
-git clone https://github.com/ShouZhuo0413/codebuddy2openai.git workbuddy2api
-cd workbuddy2api
-
-uv venv
-uv pip install -r requirements.txt
-```
-
-也可以用虚拟环境：
+### 1. 安装依赖
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt
 ```
 
-> 注意：无论是启动服务，还是执行 `python3 converter.py --help`，都必须先装依赖。
+依赖仅三个：`fastapi`、`uvicorn[standard]`、`httpx`（Python ≥ 3.10）。
 
-### 3. 启动
-
-最常用的启动方式：
+### 2. 登录账号（生成凭据）
 
 ```bash
-uv run converter.py --desensitize --log converter.log
+./login.sh
 ```
 
-或：
+浏览器打开脚本输出的授权链接，用 QQ / 微信 / 手机号完成登录后回车。凭据会以 `{uid}.info` 保存到本机凭据目录。
+
+**多账号 = 重复执行 `./login.sh` 登录不同账号即可**，每个账号一个文件，互不覆盖。
+也可以直接使用 WorkBuddy / CodeBuddy 桌面端的登录态（脚本会自动探测桌面端凭据目录）。
+
+### 3. 启动服务
 
 ```bash
-python3 converter.py --desensitize --log converter.log
+./start.sh --desensitize
+# 或直接：
+.venv/bin/python converter.py --port 8787 --desensitize
 ```
 
-看到监听 `http://127.0.0.1:8787` 就说明已经起来了。
+启动时会先执行一轮全账号签到，再打印预检信息（账号池里有哪些账号、token 是否过期）。
 
-### 4. 快速自检
+### 4. 打开面板
 
-```bash
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/v1/models
+浏览器访问：<http://127.0.0.1:8787/panel>
+
+- 每个账号一张卡片：当前使用/备用/冷却状态、昵称、token 到期时间、今日签到状态
+- 每个积分资源包一条进度条：剩余/总量 credits、周期截止日期（已耗尽的包自动隐藏）
+- 顶部统计：账号总数、总剩余 credits、今日签到进度；30 秒自动刷新
+- 非当前账号卡片右上角有 **"设为当前使用"** 按钮，点击即手动切换
+
+### 5. 客户端接入
+
+```
+Base URL: http://127.0.0.1:8787/v1
+API Key:  未设置 --api-key 时留空即可
 ```
 
-如果这两条能通，说明本地服务、登录态、基本路由都没问题。
-
----
-
-## 客户端接入
-
-### Codex CLI
-
-这是当前最推荐的接法。Codex CLI 走的是 `/v1/responses`，而不是 `/v1/chat/completions`。
-
-推荐启动命令：
-
-```bash
-uv run converter.py --desensitize --log converter.log
-```
-
-把下面配置合并到 `~/.codex/config.toml`：
+#### Codex CLI
 
 ```toml
 [model_providers.workbuddy]
@@ -142,327 +90,13 @@ env_key = "CODEBUDDY2OPENAI_KEY"
 model = "glm-5.2"
 model_provider = "workbuddy"
 ```
-
-设置一个占位环境变量：
-
-```bash
-export CODEBUDDY2OPENAI_KEY=any-value
-```
-
-启动：
-
-```bash
-codex --profile workbuddy "你的任务描述"
-```
-
-补充说明：
-
-- 推荐保留 `--desensitize`
-- 当前 `/v1/responses` 默认已经会做投影压缩
-- 如果你想尽量保留原始 system prompt，可试 `--desensitize --no-compact`
-- `--desensitize --no-compact` 下若仍命中审核，当前实现会自动退回紧凑模式重试一次
-
-### Claude Code / CC Switch
-
-Claude Code 不走 OpenAI 协议，而是走 Anthropic Messages。
-
-推荐启动命令：
-
-```bash
-uv run converter.py --desensitize --log converter.log
-```
-
-在 CC Switch 里配置：
-
-```json
-{
-  "DeepSeek-V4-Pro": {
-    "base_url": "http://127.0.0.1:8787/v1/messages",
-    "api_key": "",
-    "model": "deepseek-v4-pro"
-  }
-}
-```
-
-注意：
-
-- 模型名必须填写腾讯后端支持的真实模型名
-- 不做 Anthropic 模型名到腾讯模型名的自动映射
-- Claude Code 场景强烈建议开启 `--desensitize`
-
-### 其他 OpenAI 兼容客户端
-
-适用于：
-
-- Cherry Studio
-- ZCode
-- LobeChat
-- NextChat
-- Open WebUI
-- 自己写的 OpenAI SDK 客户端
-
-配置方式：
-
-- Base URL: `http://127.0.0.1:8787/v1`
-- API Key: 留空，或填你启动时设置的 `--api-key`
-- 模型名: `glm-5.2` / `deepseek-v4-pro` / `kimi-k2.7` / `auto` 等
-
----
-
-## 常用命令
-
-### 基本启动
-
-```bash
-python3 converter.py
-python3 converter.py --desensitize
-python3 converter.py --desensitize --log converter.log
-python3 converter.py --api-key mysecret
-python3 converter.py --port 9000
-```
-
-### 命令行参数
-
-| 参数 | 默认值 | 说明 |
-|------|------|------|
-| `--host` | `127.0.0.1` | 监听地址 |
-| `--port` | `8787` | 监听端口 |
-| `--api-key` | 无 | 给本地客户端加一层鉴权 |
-| `--log` | 无 | 记录请求与响应日志 |
-| `--desensitize` | 关 | 压缩运行时提示、去掉 tool description、零宽脱敏高风险关键词 |
-| `--no-compact` | 关 | 配合 `--desensitize` 使用，保留更完整的原始 system prompt |
-| `--skip-check` | 否 | 跳过启动预检 |
-
-### curl 示例
-
-```bash
-curl http://127.0.0.1:8787/v1/models
-
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"你好"}]}'
-
-curl -N http://127.0.0.1:8787/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"glm-5.2","stream":true,"messages":[{"role":"user","content":"数1到5"}]}'
-```
-
----
-
-## 日志与排障
-
-### 推荐启动方式
-
-```bash
-uv run converter.py --desensitize --log converter.log
-```
-
-### 日志里能看到什么
-
-每次请求都会带一个唯一 ID，常见日志包括：
-
-- `REQUEST BODY`
-- `RESPONSES → CHAT BODY`
-- `RESPONSES PROJECTION`
-- `RESPONSE BODY`
-- `RESPONSE RAW SSE`
-- `⚠️内容审核拦截`
-
-其中 `RESPONSES PROJECTION` 会告诉你：
-
-- 投影前后消息数
-- 投影前后字符数
-- tool schema 压缩量
-- 是否丢掉了 harness 消息
-- 是否保留了 anchor user
-
-### 最常见问题
-
-#### 找不到登录文件
-
-说明桌面端没登录，或者登录目录不在默认路径。先确认桌面端已经真正完成登录。
-
-#### 401
-
-分两种：
-
-- 本地 401：你启用了 `--api-key`，但客户端没带同一个 key
-- 后端 401：腾讯 token 失效，尝试重新打开桌面端登录
-
-#### 响应慢
-
-先换快一点的模型，比如 `deepseek-v4-flash`。
-
-#### 被“敏感内容”拦截
-
-这是腾讯后端的内容审核，不一定是用户问题本身敏感，很多时候是 agent runtime 文本触发的，比如：
-
-- `DoS`
-- `exploit`
-- `credential`
-- `sandbox`
-- `escalation`
-- 竞争品牌词
-- tool description 中的安全术语
-
-建议排查顺序：
-
-1. 开 `--log`
-2. 看同一请求 ID 下的 `REQUEST BODY` 或 `RESPONSES → CHAT BODY`
-3. 如果是 Codex CLI，再看 `RESPONSES PROJECTION`
-4. 开 `--desensitize`
-5. 如果还不稳，再尝试 `--desensitize --no-compact`
-
----
-
-## Docker 部署
-
-如果你更习惯用 Docker，可以直接用。
-
-前提是把宿主机登录态目录挂进去，因为容器里拿不到桌面端 auth 文件。
-
-### docker compose
-
-先改 `docker-compose.yml` 里的 auth 挂载路径，再执行：
-
-```bash
-docker compose up -d --build
-```
-
-### docker run
-
-```bash
-docker build -t workbuddy2api .
-
-docker run -d --name workbuddy2api -p 8787:8787 \
-  -v ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth:/data/auth:ro \
-  -e CODEBUDDY_AUTH_DIR=/data/auth \
-  workbuddy2api
-```
-
-### 相关环境变量
-
-| 变量 | 说明 |
-|------|------|
-| `CODEBUDDY_AUTH_DIR` | 指定登录态目录 |
-| `CODEBUDDY2OPENAI_KEY` | 本地 API Key |
-| `CODEBUDDY2OPENAI_LOG` | 日志路径 |
-
----
-
-## 模型列表
-
-当前内置默认模型列表：
-
-`glm-5.2`、`glm-5.1`、`glm-5v-turbo`、`kimi-k2.7`、`kimi-k2.6`、`kimi-k2.5`、`deepseek-v4-pro`、`deepseek-v4-flash`、`minimax-m3-pay`、`hy3-preview-agent`、`auto`
-
-具体能不能用，取决于你的 WorkBuddy / CodeBuddy 订阅。
-
----
-
-## 项目结构
-
-```text
-workbuddy2api/
-├── converter.py
-├── responses_adapter.py
-├── responses_projection.py
-├── anthropic_adapter.py
-├── desensitize.py
-├── codex-codebuddy.example.toml
-├── test_responses_adapter.py
-├── test_anthropic_adapter.py
-├── README.md
-└── LICENSE
-```
-
-各文件作用：
-
-- `converter.py`: 主入口，FastAPI 服务
-- `responses_adapter.py`: OpenAI Responses ↔ Chat 适配
-- `responses_projection.py`: Codex / agent 请求投影压缩
-- `anthropic_adapter.py`: Anthropic Messages ↔ Chat 适配
-- `desensitize.py`: 运行时文本压缩与零宽脱敏
-
----
-
-## 致谢
-
-本项目基于 [HanHan666666/codebuddy2openai](https://github.com/HanHan666666/codebuddy2openai) 的思路演进而来，感谢原作者的开源贡献。
-
-## 免责声明
-
-本项目仅用于个人学习与研究。与腾讯、WorkBuddy、CodeBuddy、OpenAI、Anthropic 无官方关联。请仅在你合法拥有订阅的前提下使用，并自行承担风险。
-
-## 开源协议
-
-[MIT](./LICENSE)
-
----
-
-<a name="english"></a>
-## English
-
-`workbuddy2api` exposes your already logged-in **WorkBuddy / CodeBuddy** desktop session as local **OpenAI- and Anthropic-compatible APIs**.
-
-Supported endpoints:
-
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
-- `POST /v1/messages`
-- `GET /v1/models`
-- `GET /health`
-
-Recommended use cases:
-
-- **Codex CLI** via `/v1/responses`
-- **Claude Code / CC Switch** via `/v1/messages`
-- **Cherry Studio / ZCode / LobeChat / Open WebUI** via `/v1/chat/completions`
-
-### Quick Start
-
-```bash
-git clone https://github.com/ShouZhuo0413/codebuddy2openai.git workbuddy2api
-cd workbuddy2api
-
-uv venv
-uv pip install -r requirements.txt
-uv run converter.py --desensitize --log converter.log
-```
-
-Then verify:
-
-```bash
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/v1/models
-```
-
-### Codex CLI
-
-Use `/v1/responses` and keep `--desensitize` enabled.
-
-```toml
-[model_providers.workbuddy]
-name = "WorkBuddy (via local converter)"
-base_url = "http://127.0.0.1:8787/v1"
-wire_api = "responses"
-env_key = "CODEBUDDY2OPENAI_KEY"
-
-[profiles.workbuddy]
-model = "glm-5.2"
-model_provider = "workbuddy"
-```
-
-Run:
 
 ```bash
 export CODEBUDDY2OPENAI_KEY=any-value
 codex --profile workbuddy "your task"
 ```
 
-### Claude Code / CC Switch
-
-Use `/v1/messages`:
+#### Claude Code / CC Switch
 
 ```json
 {
@@ -474,22 +108,177 @@ Use `/v1/messages`:
 }
 ```
 
-### Notes
+> Codex CLI 与 Claude Code 均建议开启 `--desensitize`；若仍被审核拦截，`/v1/responses` 会自动以压缩模式重试一次。
 
-- `--desensitize` is recommended for both Codex CLI and Claude Code
-- `/v1/responses` already applies backend-facing projection by default
-- `--desensitize --no-compact` preserves more of the original system prompt
-- if that still gets review-blocked, `/v1/responses` will retry once in compact mode
+---
 
-### CLI Options
+## 凭据目录（自动扫描）
 
-```bash
-python3 converter.py [--host HOST] [--port PORT] [--api-key KEY] [--log PATH] [--desensitize] [--skip-check]
+服务按以下顺序扫描所有存在的目录，并按账号 uid 去重：
+
+1. 环境变量 `CODEBUDDY_AUTH_DIR` 指定的目录
+2. Linux/WSL：`~/.local/share/CodeBuddyExtension/Data/Public/auth`
+3. WSL 下自动探测 Windows 宿主机：`/mnt/c/Users/*/AppData/Local/CodeBuddyExtension/Data/Public/auth`
+4. macOS：`~/Library/Application Support/CodeBuddyExtension/Data/Public/auth`
+5. Windows 原生：`%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth`
+
+凭据文件为 JSON（`.info` 后缀），结构：
+
+```json
+{
+  "account": { "uid": "...", "nickname": "...", "enterpriseId": "" },
+  "auth": { "accessToken": "...", "refreshToken": "...", "expiresAt": 0, "domain": "www.codebuddy.cn" }
+}
 ```
 
-### Disclaimer
+> ⚠️ 凭据文件等同账号密码，请勿提交到版本库或分享给他人。本项目已通过 `.gitignore` 排除 `*.token` / `*.key` / `secrets.*` / `checkin_state.json`。
 
-For personal learning and research only. Not affiliated with Tencent, WorkBuddy, CodeBuddy, OpenAI, or Anthropic.
+---
+
+## HTTP 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/chat/completions` | OpenAI Chat 兼容（原生 tools/tool_calls，流式/非流式） |
+| POST | `/v1/responses` | OpenAI Responses 兼容（Codex CLI） |
+| POST | `/v1/messages` | Anthropic Messages 兼容（Claude Code / CC Switch） |
+| POST | `/v1/messages/count_tokens` | Anthropic token 计数（stub） |
+| GET  | `/v1/models` | 模型列表 |
+| GET  | `/health` | 健康检查 + 账号池概览 |
+| GET  | `/panel` | 可视化账号池面板（网页） |
+| GET  | `/v1/account-status` | 面板数据接口：账号状态 + credits 额度 + 签到状态 |
+| POST | `/v1/account-switch` | 手动切换当前账号，请求体 `{"uid": "<账号uid>"}` |
+
+### 账号池调度细节
+
+- 候选顺序：当前账号 → 其他健康账号 → 冷却中账号（兜底硬试）
+- 触发切换的状态码：`401 / 402 / 403 / 429`；或响应文本含 `额度 / 余额 / 积分不足 / 配额 / quota / insufficient / exceeded / 限流 / 频率`
+- 切换只发生在**尚未向客户端输出任何字节之前**——客户端不会收到半截流再断开
+- 失败账号冷却 30 分钟后恢复候选；成功账号会被"粘住"
+
+---
+
+## 启动参数与环境变量
+
+```
+--host            监听地址（默认 127.0.0.1）
+--port            监听端口（默认 8787）
+--api-key         要求客户端携带的 API key（默认不校验；也可用环境变量 CODEBUDDY2OPENAI_KEY）
+--log PATH        请求/响应日志写入该文件（默认关闭）
+--desensitize     启用零宽脱敏 + system 压缩（缓解内容审核误拦，建议开启）
+--no-compact      配合 --desensitize：跳过压缩只做脱敏，保留完整 system 提示词
+--skip-check      跳过启动预检
+```
+
+| 环境变量 | 说明 |
+|----------|------|
+| `CODEBUDDY_AUTH_DIR` | 额外指定凭据目录（优先扫描） |
+| `CODEBUDDY2OPENAI_KEY` | 等效 `--api-key` |
+| `CODEBUDDY2OPENAI_LOG` | 等效 `--log` |
+
+---
+
+## systemd 常驻部署（Linux / WSL2）
+
+`~/.config/systemd/user/workbuddy2api.service`：
+
+```ini
+[Unit]
+Description=WorkBuddy/CodeBuddy OpenAI Reverse Proxy & Auto Checkin
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workbuddy2api
+ExecStart=%h/workbuddy2api/start.sh --desensitize
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now workbuddy2api
+journalctl --user -u workbuddy2api -f     # 查看日志
+```
+
+## Docker 部署（可选）
+
+```bash
+# 先在宿主机完成登录（或把凭据目录挂进容器），再：
+docker compose up -d
+```
+
+`docker-compose.yml` 默认挂载 macOS 凭据路径，其他平台请修改 volumes 中的 auth 目录。容器内多账号同理——挂载的目录里有几个 `.info` 文件就有几个账号。
+
+---
+
+## 签到脚本单独使用
+
+```bash
+.venv/bin/python checkin.py
+```
+
+自动遍历凭据目录中所有账号：token 临近过期先刷新 → 调用每日签到接口 → 结果打印并写入 `checkin_state.json`（按 uid 去重，同账号多份凭据只签一次）。
+
+---
+
+## 测试
+
+```bash
+# 账号池端到端测试（内置本地 mock 后端，34 项断言，不依赖真实账号）
+.venv/bin/python test_account_pool.py
+
+# 协议适配器测试
+.venv/bin/python test_anthropic_adapter.py
+.venv/bin/python test_responses_adapter.py
+```
+
+`test_account_pool.py` 覆盖：uid 去重、粘性/冷却/切换顺序、failover 状态码与文本判定、非流式与流式端到端切换、全部账号失败时的错误透传、面板数据接口。
+
+---
+
+## 与 CLIProxyAPI 集成（可选）
+
+本服务可作为 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的一个 OpenAI 兼容渠道，把账号池暴露进统一网关：
+
+```yaml
+openai-compatibility:
+  - name: "workbuddy"
+    base-url: "http://127.0.0.1:8787/v1"
+    api-key-entries:
+      - api-key: "any-non-empty-string"   # 本服务未设 --api-key 时不校验
+        proxy-url: "direct"               # 本机回环必须直连，避免走全局代理
+    models:
+      - name: "glm-5.2"
+        alias: "glm-5.2"
+      # ...其余模型同理
+```
+
+---
+
+## 目录结构
+
+```
+workbuddy2api/
+├── converter.py               # 主服务：三协议转换 + 账号池 + 面板（FastAPI）
+├── responses_adapter.py       # Responses API ↔ Chat 转换
+├── responses_projection.py    # Responses 请求投影/压缩
+├── anthropic_adapter.py       # Anthropic Messages ↔ Chat 转换
+├── desensitize.py             # 内容审核脱敏（零宽字符 + system 压缩）
+├── checkin.py                 # 每日签到（多账号遍历 + 状态记录）
+├── oauth_login.py             # OAuth 设备流登录，生成 {uid}.info 凭据
+├── start.sh                   # 启动脚本（先签到再起服务）
+├── login.sh                   # 登录脚本
+├── test_account_pool.py       # 账号池端到端测试（含 mock 后端）
+├── test_anthropic_adapter.py  # Anthropic 适配器测试
+├── test_responses_adapter.py  # Responses 适配器测试
+├── requirements.txt           # fastapi / uvicorn / httpx
+├── Dockerfile / docker-compose.yml
+└── checkin_state.json         # 签到状态（运行时生成，不入库）
+```
 
 ---
 
