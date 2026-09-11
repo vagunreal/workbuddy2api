@@ -909,8 +909,12 @@ async function loadModels() {
     '其他': {color:'#6b7280', abbr:'·'},
   };
   const ORDER = ['DeepSeek', '智谱 GLM', 'Kimi', '混元', 'MiniMax', '其他'];
+  const rateNumOf = m => m.meta?.credits ? parseFloat(String(m.meta.credits).replace(/[^0-9.]/g, '')) : Infinity;
   const groups = {};
   for (const m of visible) { const v = vendorOf(m.name); (groups[v] = groups[v] || []).push(m); }
+  for (const v in groups) groups[v].sort((a, b) => rateNumOf(a) - rateNumOf(b));
+  ORDER.sort((a, b) => (groups[a] && groups[b] ? rateNumOf(groups[a][0]) - rateNumOf(groups[b][0])
+                        : groups[a] ? -1 : groups[b] ? 1 : 0));
   const rowHtml = m => {
     const p = m.probe;
     const ps_badge = p && p.ok ? '<span class="ps" title="最近一次可用性检测通过">✅</span>' : '';
