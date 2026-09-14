@@ -25,7 +25,7 @@
 | 每日签到 | `checkin.py` 遍历所有账号签到领积分，结果写入 `checkin_state.json` 供面板展示 |
 | token 自动刷新 | 每个账号临近过期自动调 `/v2/plugin/auth/token/refresh` 刷新并原子回写凭据文件 |
 | 三协议兼容 | OpenAI Chat / OpenAI Responses / Anthropic Messages，均支持流式与工具调用 |
-| 脱敏 | `--desensitize` 对 system 提示词做零宽字符脱敏 + 压缩，缓解后端内容审核误拦 |
+| 脱敏 | `--desensitize` 对 system 提示词做零宽字符脱敏 + 压缩，缓解后端内容审核误拦；**不含工作区指令**——`<system-reminder>` 里的 AGENTS.md / CLAUDE.md 原样透传 |
 | 模型管理 | 自动从上游发现可用模型；每个模型可编辑参数规格(上下文窗口/最大输出/输入输出类型)；自定义模型与别名；一键可用性探测 |
 
 ---
@@ -181,6 +181,13 @@ codex --profile workbuddy "your task"
 --no-compact      配合 --desensitize：跳过压缩只做脱敏，保留完整 system 提示词
 --skip-check      跳过启动预检
 ```
+
+> **脱敏范围（重要）**：`--desensitize` 只重写 system / developer 消息，以及 Codex CLI 注入的运行时块
+> （`<environment_context>` / `<permissions instructions>` / `<collaboration_mode>` / `<skills_instructions>`）。
+> ZCode CLI 与 Claude Code 放在 `<system-reminder>` 里的**工作区指令**（AGENTS.md、CLAUDE.md、记忆索引）
+> **原样透传**——早先版本会把这整条消息替换成一句占位符，模型因此完全看不到规则（典型症状：代理后面的
+> agent 不遵守 AGENTS.md，Windows 上不用 `pwsh` 而用 `powershell`）。如需连 system 提示词也保持原样，
+> 用 `--no-compact`。另外 `--desensitize` 会剥离 tools 的 `description` 字段（参数 schema 保留）。
 
 | 环境变量 | 说明 |
 |----------|------|
