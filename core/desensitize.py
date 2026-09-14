@@ -133,14 +133,18 @@ _PATTERN = re.compile(
 
 # Codex CLI 会把大量运行时上下文包装进一条 user 消息里；这些不是用户真正提问，
 # 里面常含 permissions / sandbox / skills 等说明，也会触发后端审核。
+#
+# 注意：`<system-reminder>` 与 `# claudeMd` 故意不在此列。Codex 的这些标记里装的是
+# 运行时元数据，但 ZCode CLI 和 Claude Code 把**工作区指令**（AGENTS.md / CLAUDE.md、
+# 记忆索引）也放在 `<system-reminder>` 里。把它们当"可压缩的运行时上下文"处理，会把
+# 整段指令替换成一句占位符，模型因此完全看不到规则（实测：14007 字符 -> 131 字符，
+# 表现为代理后面的模型不遵守 AGENTS.md、Windows 上不用 pwsh 而用 powershell 5.1）。
 _HARNESS_USER_MARKERS = (
     "# AGENTS.md instructions",
     "<environment_context>",
     "<permissions instructions>",
     "<collaboration_mode>",
     "<skills_instructions>",
-    "<system-reminder>",           # Claude Code 注入的运行时上下文
-    "# claudeMd",                  # Claude Code CLAUDE.md 注入
 )
 
 _CODEX_SYSTEM_MARKERS = (
@@ -191,11 +195,8 @@ _RUNTIME_BLOCK_REPLACEMENTS = (
         "</plugins_instructions>",
         "Runtime plugin metadata is available when relevant.",
     ),
-    (
-        "<system-reminder>",
-        "</system-reminder>",
-        "Runtime reminder context is provided by the harness.",
-    ),
+    # 此处刻意没有 <system-reminder>：ZCode CLI / Claude Code 用它承载 AGENTS.md、
+    # CLAUDE.md 与记忆索引，替换掉它等于删掉工作区指令。见 _HARNESS_USER_MARKERS 注释。
 )
 
 _RUNTIME_TAIL_MARKERS = (
@@ -349,11 +350,9 @@ def _compact_harness_message(role: str, content) -> str | None:
         return (
             "Runtime skill metadata is available. Use relevant skills only when explicitly requested or clearly applicable."
         )
-    if role == "user" and _looks_like_harness_user_message(content):
-        return (
-            "Repository instructions and environment context are provided. Follow repository guidance "
-            "while answering the user's actual request."
-        )
+    # user 角色的 harness 消息不再整条替换：ZCode / Claude Code 把工作区指令放在这类
+    # 消息里，整条换掉会连指令一起丢。它改由 _prune_runtime_fragments 只重写其中
+    # 明确属于运行时元数据的块（environment / permissions / skills 等）。
     return None
 
 
