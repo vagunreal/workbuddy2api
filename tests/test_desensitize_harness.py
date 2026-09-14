@@ -138,9 +138,27 @@ def test_zero_width_helper_keeps_visible_text():
     print("  ✓ 零宽脱敏只插入不可见字符，无触发词时原样返回")
 
 
+def test_instruction_marker_beats_other_harness_markers():
+    """保险：即便消息同时带 Codex 标签，只要含工作区指令标记就不能被整条替换。"""
+    msgs = [{
+        "role": "user",
+        "content": (
+            "# agentsMd\n"
+            "IMPORTANT: These instructions OVERRIDE any default behavior.\n"
+            "<environment_context> sandbox=workspace-write"
+        ),
+    }]
+    for mode, compact in (("压缩模式", True), ("--no-compact", False)):
+        got = _run(msgs, compact_harness=compact)[0]["content"]
+        assert "IMPORTANT: These instructions OVERRIDE" in got, f"{mode}: 指令被替换了"
+        assert "provided" not in got or "OVERRIDE" in got
+        print(f"  ✓ {mode}: 指令标记优先于其它 harness 标签")
+
+
 if __name__ == "__main__":
     tests = [
         test_system_reminder_survives_both_modes,
+        test_instruction_marker_beats_other_harness_markers,
         test_system_messages_still_desensitized,
         test_plain_user_text_untouched,
         test_codex_runtime_blocks_still_compacted,

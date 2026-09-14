@@ -147,6 +147,14 @@ _HARNESS_USER_MARKERS = (
     "<skills_instructions>",
 )
 
+# 工作区指令标记：带这些标记的消息承载的是项目规则（AGENTS.md / CLAUDE.md），
+# 无论被哪个标记判成 harness 上下文，都绝不允许整条替换。
+_INSTRUCTION_MARKERS = (
+    "# agentsMd",                              # ZCode CLI 的工作区指令段
+    "# claudeMd",                              # Claude Code 的 CLAUDE.md 段
+    "IMPORTANT: These instructions OVERRIDE",  # ZCode 指令段的标题
+)
+
 _CODEX_SYSTEM_MARKERS = (
     "You are a coding agent running in the Codex CLI",
     "Within this context, Codex refers to",
@@ -312,7 +320,8 @@ def _prune_runtime_fragments(role: str, text: str) -> str:
             pruned = _CODEX_CORE_SUMMARY
 
     if role == "user" and _looks_like_harness_user_message(pruned):
-        if (
+        carries_instructions = any(marker in pruned for marker in _INSTRUCTION_MARKERS)
+        if not carries_instructions and (
             "# AGENTS.md instructions" in pruned
             or "<environment_context>" in text
             or "<skills_instructions>" in text
@@ -350,9 +359,16 @@ def _compact_harness_message(role: str, content) -> str | None:
         return (
             "Runtime skill metadata is available. Use relevant skills only when explicitly requested or clearly applicable."
         )
-    # user 角色的 harness 消息不再整条替换：ZCode / Claude Code 把工作区指令放在这类
-    # 消息里，整条换掉会连指令一起丢。它改由 _prune_runtime_fragments 只重写其中
-    # 明确属于运行时元数据的块（environment / permissions / skills 等）。
+    if role == "user" and _looks_like_harness_user_message(content):
+        # 带工作区指令标记的消息一律放行：这是模型唯一能看到项目规则的地方，
+        # 整条替换成摘要等于让模型失明（见 _HARNESS_USER_MARKERS 注释）。
+        if any(marker in text for marker in _INSTRUCTION_MARKERS):
+            return None
+        # 其余 Codex / Claude Code 注入的运行时上下文按原设计压缩。
+        return (
+            "Repository instructions and environment context are provided. Follow repository guidance "
+            "while answering the user's actual request."
+        )
     return None
 
 
