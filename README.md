@@ -1,5 +1,15 @@
 # workbuddy2api
 
+## 📢 版本更新公告
+
+| 版本 | 日期 | 状态 | 更新内容 |
+|------|------|------|----------|
+| **V1.1** | 2026-09-14 | **当前版本** | 修复 `--desensitize` 把工作区指令（AGENTS.md / CLAUDE.md）整条替换成占位符的问题——症状是经本代理接入的 agent 不遵守项目规则、Windows 上不用 `pwsh` 而用 `powershell` 5.1；另外 `GET /health` 新增 `version` 字段 |
+| V1 | 2026-09-12 | 初始版本 | 首个可用版本；已知问题见 V1.1 的修复说明 |
+
+> 正在运行的版本可用 `GET /health` 的 `version` 字段确认。
+> 完整变更、行为对照、升级与回滚步骤见 [CHANGELOG.md](CHANGELOG.md)。
+
 把 **WorkBuddy / CodeBuddy（腾讯代码助手）** 的登录凭据，转成本机可直接使用的 **OpenAI / Anthropic 兼容 API**，并内置：
 
 - **多账号池**：多个账号聚合为一个服务，额度用尽自动切换下一个

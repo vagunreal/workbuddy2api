@@ -1139,7 +1139,10 @@ PASSTHROUGH_BODY_KEYS = {
 # FastAPI 应用
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="codebuddy2openai", version="2.0")
+# 项目版本号：与 git tag 一致，便于运行时确认跑的是哪个版本（见 CHANGELOG.md）
+PROJECT_VERSION = "V1.1"
+
+app = FastAPI(title="codebuddy2openai", version=PROJECT_VERSION)
 # 允许 CLIProxyAPI 管理面板(8317)下的 workbuddy 板块页跨源调用本服务
 app.add_middleware(
     CORSMiddleware,
@@ -1264,7 +1267,8 @@ def _safe_nickname(cred: CredentialManager) -> str:
 @app.get("/health")
 def health():
     pool: CredentialPool = CONFIG["pool"]
-    info: dict = {"status": "ok", "platform": sys.platform, "python": sys.version.split()[0],
+    info: dict = {"status": "ok", "version": PROJECT_VERSION, "platform": sys.platform,
+                  "python": sys.version.split()[0],
                   "auth_dirs": [str(d) for d in auth_dirs() if d.is_dir()],
                   "mode": "direct-proxy (native function calling, multi-account pool)"}
     if pool is not None:
@@ -2258,6 +2262,7 @@ async def count_tokens(request: Request,
 def preflight() -> bool:
     files = find_auth_files()
     sys.stderr.write("==== 预检 ====\n")
+    sys.stderr.write(f"版本      : {PROJECT_VERSION}\n")
     sys.stderr.write(f"平台      : {sys.platform}\n")
     sys.stderr.write(f"Python    : {sys.version.split()[0]}\n")
     sys.stderr.write(f"后端      : {BACKEND} (直连，原生 function calling)\n")
